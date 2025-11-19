@@ -2,6 +2,16 @@
 
 An interactive 3D web application for managing and manipulating GLB 3D models with real-time Firebase synchronization.
 
+## Interface
+
+![3D Model Viewer Interface](public/demo/3Dview.png)
+![2D Model Viewer Interface](public/demo/2Dview.png)
+
+## Features Demo
+
+![Features Demo](public/demo/demo3DModelViewer.gif)
+
+
 ## Overview
 
 This application provides an intuitive interface for viewing and manipulating two 3D models in both 3D and 2D perspectives. All model positions and rotations are automatically synchronized with Firebase Firestore for persistence across sessions.
