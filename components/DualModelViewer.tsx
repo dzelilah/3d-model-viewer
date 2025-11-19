@@ -173,25 +173,6 @@ function SceneContent({
   const orbitControlsRef = useRef<any>(null)
   const model1Ref = useRef<Group>(null)
   const model2Ref = useRef<Group>(null)
-  
-  const cameraConfig = viewMode === '2d' 
-    ? {
-        position: [0, 10, 0] as [number, number, number],
-        rotation: [-Math.PI / 2, 0, 0] as [number, number, number],
-        fov: 50,
-        near: 0.1,
-        far: 1000
-      }
-    : {
-        position: [4, 4, 4] as [number, number, number],
-        fov: 75
-      }
-
-  // Handle canvas click for placing model when in drag mode
-  const handleCanvasClick = (event: any) => {
-    // This will be handled by individual DraggableModel components
-    // when they are in drag mode
-  }
 
   return (
     <>
@@ -283,8 +264,8 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
                 zoom: 100
               }
             : {
-                position: [0, 4, 12] as [number, number, number],  // Further back for better overview
-                fov: 60,  // Wider field of view
+                position: [0, 4, 12] as [number, number, number], 
+                fov: 60,
                 zoom: 1
               }
           )

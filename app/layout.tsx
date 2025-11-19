@@ -8,6 +8,8 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: '3D Model Management App',
   description: 'Manage GLB 3D models with Firebase synchronization',
+  keywords: ['3D', 'models', 'Firebase', 'WebGL', 'Three.js'],
+  authors: [{ name: 'Dzelila Halilovic Akinci' }],
 }
 
 export default function RootLayout({

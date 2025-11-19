@@ -35,7 +35,7 @@ export function useDragControls(
       
       if (raycaster.ray.intersectPlane(groundPlane, intersection) && meshRef.current) {
         meshRef.current.position.set(intersection.x, 0, intersection.z)
-        // Prosledi trenutnu poziciju modela za collision detection
+        // Pass the current model position for collision detection
         const modelPosition = new Vector3(intersection.x, 0, intersection.z)
         updateCollisionWarning(modelPosition)
       }
@@ -53,7 +53,7 @@ export function useDragControls(
     
     if (orbitControlsRef.current) orbitControlsRef.current.enabled = true
     
-    // Sprečavanje pozicioniranja ako postoji kolizija
+    // Prevent positioning if there is a collision
     if (meshRef.current && !isCollisionWarning) {
       const newPosition: [number, number, number] = [
         meshRef.current.position.x,
@@ -64,7 +64,7 @@ export function useDragControls(
       onPositionChange(newPosition)
     }
     
-    // Reset collision warning tek posle proveravanja
+    // Reset collision warning after checking
     resetCollisionWarning()
     
     const element = gl.domElement as HTMLCanvasElement & { _cleanupDrag?: () => void }
