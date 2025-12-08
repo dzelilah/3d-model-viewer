@@ -23,6 +23,7 @@ export function useModelSync(
   useEffect(() => {
     const loadData = async () => {
       try {
+        console.log(`🔥 Firebase: Loading data for ${modelId}`)
         setIsLoading(true)
         setError(null)
         
@@ -31,6 +32,7 @@ export function useModelSync(
         
         if (snapshot.exists()) {
           const data = snapshot.data() as ModelData
+          console.log(`✅ Firebase: Data found for ${modelId}:`, data)
           
           if (data.position) {
             setPosition([data.position.x, data.position.y, data.position.z])
@@ -39,12 +41,15 @@ export function useModelSync(
           if (typeof data.rotation === 'number') {
             setRotation(data.rotation)
           }
+        } else {
+          console.log(`📝 Firebase: No data found for ${modelId}, using defaults`)
         }
       } catch (err) {
-        console.error(`Error loading model ${modelId}:`, err)
+        console.error(`❌ Firebase Error for ${modelId}:`, err)
         setError(`Failed to load model ${modelId}`)
       } finally {
         setIsLoading(false)
+        console.log(`🏁 Firebase: Finished loading ${modelId}`)
       }
     }
 

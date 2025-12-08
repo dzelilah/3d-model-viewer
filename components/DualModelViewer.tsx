@@ -1,5 +1,4 @@
 'use client'
-
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Environment, useGLTF } from '@react-three/drei'
 import { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
@@ -7,9 +6,11 @@ import { useState, useRef, useEffect } from 'react'
 import { Group } from 'three'
 import * as THREE from 'three'
 import { useModelSync } from '../hooks/useModelSync'
-import { useCollisionDetection } from '../hooks/useCollisionDetection'
+import { useCollisionDetection, checkGroupsIntersectXZ } from '../hooks/useCollisionDetection'
 import { useDragControls } from '../hooks/useDragControls'
 import { useVisualFeedback } from '../hooks/useVisualFeedback'
+import TextBox from './TextBox'
+import { useTextBoxes } from '../hooks/useTextBoxes'
 
 interface DualModelViewerProps {
   viewMode: '3d' | '2d'
@@ -24,6 +25,7 @@ interface DraggableModelProps {
   otherModelRef: React.MutableRefObject<Group | null>
   modelRef: React.MutableRefObject<Group | null>
   onPositionChange: (position: [number, number, number]) => void
+  onDragStateChange?: (dragging: boolean) => void
 }
 
 function DraggableModel({ 
@@ -33,22 +35,24 @@ function DraggableModel({
   orbitControlsRef,
   otherModelRef,
   modelRef,
-  onPositionChange
+  onPositionChange,
+  onDragStateChange
 }: DraggableModelProps) {
   const [isHovered, setIsHovered] = useState(false)
   const [position, setPosition] = useState<[number, number, number]>(externalPosition)
   const { scene: gltfScene } = useGLTF(modelPath)
 
-  const { updateCollisionWarning, resetCollisionWarning, isCollisionWarning } = useCollisionDetection(otherModelRef)
+  const { updateCollisionWarning, resetCollisionWarning, isCollisionWarning, checkCollisionAtPosition } = useCollisionDetection(otherModelRef)
   const { setHoverCursor } = useVisualFeedback()
-  const { meshRef, isDragging, handleModelClick } = useDragControls(
+  const { meshRef, isDragging, handleModelPointerDown, handleModelPointerMove, handleModelPointerUp } = useDragControls(
     orbitControlsRef,
     onPositionChange,
     updateCollisionWarning,
-    isCollisionWarning,
+    checkCollisionAtPosition,
     resetCollisionWarning,
     position,
-    setPosition
+    setPosition,
+    onDragStateChange
   )
 
   useEffect(() => {
@@ -69,7 +73,7 @@ function DraggableModel({
     const box = new THREE.Box3().setFromObject(gltfScene)
     const center = box.getCenter(new THREE.Vector3())
     
-    gltfScene.position.set(-center.x, -box.min.y, -center.z)
+    gltfScene.position.set(-center.x, 0, -center.z)
   }, [gltfScene])
 
   const handlePointerEnter = () => {
@@ -86,7 +90,9 @@ function DraggableModel({
     <>
       <group
         ref={meshRef}
-        onClick={handleModelClick}
+        onPointerDown={handleModelPointerDown}
+        onPointerMove={handleModelPointerMove}
+        onPointerUp={handleModelPointerUp}
         onPointerEnter={() => {
           setIsHovered(true)
           setHoverCursor(true)
@@ -103,51 +109,23 @@ function DraggableModel({
         
         <primitive 
           object={gltfScene} 
-          scale={[0.2, 0.2, 0.2]}
-          onClick={handleModelClick}
+          scale={[0.05, 0.05, 0.05]}
+          onPointerDown={handleModelPointerDown}
+          onPointerMove={handleModelPointerMove}
+          onPointerUp={handleModelPointerUp}
         />
         
         {isDragging && (
-          <>
-            <mesh position={[0, -0.45, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <circleGeometry args={[2.0, 32]} />
-              <meshBasicMaterial 
-                color={isCollisionWarning ? "#ff4444" : "#44ff44"}
-                transparent 
-                opacity={0.3} 
-              />
-            </mesh>
-            
-            <mesh position={[0, -0.4, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <circleGeometry args={[0.3, 16]} />
-              <meshBasicMaterial 
-                color={isCollisionWarning ? "#ff0000" : "#00ff00"}
-                transparent 
-                opacity={0.7} 
-              />
-            </mesh>
-            
-            <mesh position={[0, -0.44, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <ringGeometry args={[1.6, 2.0, 32]} />
-              <meshBasicMaterial 
-                color={isCollisionWarning ? "#ff4444" : "#44ff44"}
-                transparent 
-                opacity={0.8} 
-              />
-            </mesh>
-          </>
-        )}
-        
-        {isHovered && !isDragging && (
-          <mesh position={[0, -0.45, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[1.4, 1.6, 32]} />
+          <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[2.0, 32]} />
             <meshBasicMaterial 
-              color="#4f7df3" 
+              color={isCollisionWarning ? "#ff4444" : "#44ff44"}
               transparent 
-              opacity={0.6} 
+              opacity={0.3} 
             />
           </mesh>
         )}
+        
       </group>
     </>
   )
@@ -160,7 +138,15 @@ function SceneContent({
   model2Position,
   model2Rotation,
   onModel1PositionChange,
-  onModel2PositionChange
+  onModel2PositionChange,
+  model1Ref,
+  model2Ref,
+  activeTool,
+  addBox,
+  setActiveTool,
+  textboxDragging,
+  selectedId,
+  onModelDragChange
 }: { 
   viewMode: '3d' | '2d'
   model1Position: [number, number, number]
@@ -169,10 +155,18 @@ function SceneContent({
   model2Rotation: number
   onModel1PositionChange: (position: [number, number, number]) => void
   onModel2PositionChange: (position: [number, number, number]) => void
+  model1Ref: React.MutableRefObject<Group | null>
+  model2Ref: React.MutableRefObject<Group | null>
+  activeTool: 'none' | 'text-box'
+  addBox: (position: [number, number, number]) => void
+  setActiveTool: (tool: 'none' | 'text-box') => void
+  textboxDragging: boolean
+  selectedId: string | null
+  onModelDragChange: (dragging: boolean) => void
 }) {
   const orbitControlsRef = useRef<any>(null)
-  const model1Ref = useRef<Group>(null)
-  const model2Ref = useRef<Group>(null)
+
+  // Layered rendering removed; single-pass render avoids duplicates
 
   return (
     <>
@@ -188,48 +182,65 @@ function SceneContent({
         target={[0, 0, 0]}
         maxPolarAngle={viewMode === '2d' ? 0 : Math.PI}
         minPolarAngle={viewMode === '2d' ? 0 : 0}
+        enabled={!textboxDragging && selectedId === null}
       />
       
       <Environment preset="sunset" />
       
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]}>
-        <planeGeometry args={[10, 10]} />
-        <meshStandardMaterial color="#333" transparent opacity={0.3} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}
+        onPointerDown={(e) => {
+          if (activeTool !== 'text-box') return
+          e.stopPropagation()
+          const point = (e as any).point as THREE.Vector3
+          addBox([point.x, 2.0, point.z])
+          setActiveTool('none')
+        }}>
+        <planeGeometry args={[15, 15]} />
+          <meshStandardMaterial color="#333" transparent opacity={0.3} />
       </mesh>
       
       {/* Grid for 2D view */}
       {viewMode === '2d' && (
-        <gridHelper args={[10, 20, 0x444444, 0x444444]} position={[0, -0.99, 0]} />
+        <gridHelper args={[15, 30, 0x444444, 0x444444]} position={[0, 0, 0]} />
       )}
       
       <DraggableModel
-        modelPath="/models/bust_of_a_rhetorician.glb"
+        modelPath="/models/hedra_bedside_table_grey_and_brass.glb"
         position={model1Position}
         rotation={model1Rotation}
-        modelName="Bust of Rhetorician"
+        modelName="Table"
         orbitControlsRef={orbitControlsRef}
         otherModelRef={model2Ref}
         modelRef={model1Ref}
         onPositionChange={onModel1PositionChange}
+        onDragStateChange={onModelDragChange}
       />
       
       <DraggableModel
-        modelPath="/models/lion_crushing_a_serpent.glb"
+        modelPath="/models/branagh_large_ottoman_pearl_grey.glb"
         position={model2Position}
         rotation={model2Rotation}
-        modelName="Lion Crushing Serpent"
+        modelName="Ottoman"
         orbitControlsRef={orbitControlsRef}
         otherModelRef={model1Ref}
         modelRef={model2Ref}
         onPositionChange={onModel2PositionChange}
+        onDragStateChange={onModelDragChange}
       />
+
+      {/* Removed dual cameras to prevent duplicate rendering */}
     </>
   )
 }
 
 export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
+    const { boxes, activeTool, setActiveTool, selectedId, setSelectedId, addBox, updateBox, removeBox } = useTextBoxes('default')
   const model1 = useModelSync('model1', [-3, 0, 0], 0)
   const model2 = useModelSync('model2', [3, 0, 0], 0)
+  const model1Ref = useRef<Group>(null)
+  const model2Ref = useRef<Group>(null)
+  const [textboxDragging, setTextboxDragging] = useState(false)
+  const [modelDragging, setModelDragging] = useState(false)
 
   if (model1.isLoading || model2.isLoading) {
     return (
@@ -271,6 +282,18 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
           )
         }}
         style={{ width: '100%', height: '100%' }}
+        onPointerDown={(e) => {
+          if (activeTool !== 'text-box') return
+          // Place a text box at clicked ground position (raycast plane)
+          const ndc = { x: (e.clientX / (e.target as HTMLElement).clientWidth) * 2 - 1, y: - (e.clientY / (e.target as HTMLElement).clientHeight) * 2 + 1 }
+          // Use the scene ground plane at y=0; approximate via unproject ray from camera
+          // drei handles Html at a 3D position, so we just use the intersection point already provided
+          // @react-three/fiber passes point for intersections; fallback to center if missing
+          const point = (e as any).point as THREE.Vector3 | undefined
+          const pos: [number, number, number] = point ? [point.x, Math.max(point.y, 0.01), point.z] : [0, 0.01, 0]
+          addBox(pos)
+          setActiveTool('none')
+        }}
       >
         <SceneContent 
           viewMode={viewMode} 
@@ -280,35 +303,97 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
           model2Rotation={model2.rotation}
           onModel1PositionChange={model1.setSyncedPosition}
           onModel2PositionChange={model2.setSyncedPosition}
+          model1Ref={model1Ref}
+          model2Ref={model2Ref}
+          activeTool={activeTool}
+          addBox={addBox}
+          setActiveTool={setActiveTool}
+          textboxDragging={textboxDragging}
+          selectedId={selectedId}
+          onModelDragChange={setModelDragging}
         />
+        {/* Render text boxes inside the Canvas so Html can attach to 3D */}
+        {boxes.map((b) => (
+          <TextBox
+            key={b.id}
+            box={b}
+            selected={selectedId === b.id}
+            onSelect={setSelectedId}
+            onChange={updateBox}
+            onRemove={removeBox}
+            onDone={() => setSelectedId(null)}
+            onDragStart={() => setTextboxDragging(true)}
+            onDragEnd={() => setTextboxDragging(false)}
+            modelDragging={modelDragging}
+          />
+        ))}
       </Canvas>
+
+      {/* Simple toolbar to enable Text Box tool */}
+      <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 8 }}>
+        <button onClick={() => setActiveTool(activeTool === 'text-box' ? 'none' : 'text-box')}
+          style={{ padding: '6px 10px', background: activeTool === 'text-box' ? '#66aaff' : '#222', color: '#fff', borderRadius: 4 }}>
+          Text Box Tool
+        </button>
+      </div>
+
+      
       
       <div className="dual-rotation-controls">
         <h3>Model Rotation Controls</h3>
         
         <div className="dual-model-control">
-          <label>Bust of Rhetorician</label>
+          <label>Bedside Table</label>
           <div className="dual-slider-container">
             <input
               type="range"
               min="0"
               max="100"
               value={model1.rotation}
-              onChange={(e) => model1.setSyncedRotation(Number(e.target.value))}
+              onChange={(e) => {
+                const proposed = Number(e.target.value)
+                // Tentatively rotate the group, check intersection, then revert
+                if (model1Ref.current && model2Ref.current) {
+                  const g = model1Ref.current
+                  const prevY = g.rotation.y
+                  g.rotation.y = (proposed / 100) * Math.PI * 2
+                  const intersects = checkGroupsIntersectXZ(g, model2Ref.current, { margin: 0.80 })
+                  g.rotation.y = prevY
+                  if (!intersects) {
+                    model1.setSyncedRotation(proposed)
+                  }
+                } else {
+                  model1.setSyncedRotation(proposed)
+                }
+              }}
               className="dual-rotation-slider"
             />
           </div>
         </div>
         
         <div className="dual-model-control">
-          <label>Lion Crushing Serpent</label>
+          <label>Ottoman (Pearl Grey)</label>
           <div className="dual-slider-container">
             <input
               type="range"
               min="0"
               max="100"
               value={model2.rotation}
-              onChange={(e) => model2.setSyncedRotation(Number(e.target.value))}
+              onChange={(e) => {
+                const proposed = Number(e.target.value)
+                if (model2Ref.current && model1Ref.current) {
+                  const g = model2Ref.current
+                  const prevY = g.rotation.y
+                  g.rotation.y = (proposed / 100) * Math.PI * 2
+                  const intersects = checkGroupsIntersectXZ(g, model1Ref.current, { margin: 0.80 })
+                  g.rotation.y = prevY
+                  if (!intersects) {
+                    model2.setSyncedRotation(proposed)
+                  }
+                } else {
+                  model2.setSyncedRotation(proposed)
+                }
+              }}
               className="dual-rotation-slider"
             />
           </div>
