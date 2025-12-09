@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import { TextBoxData } from '../hooks/useTextBoxes'
 import { useThree } from '@react-three/fiber'
@@ -73,31 +74,52 @@ export default function TextBox({ box, selected, onSelect, onChange, onRemove, o
       ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4)
     }
 
-    // Draw text
+    // Flip canvas horizontally and vertically to mirror text up and to the right
+    ctx.save()
+    ctx.translate(0, canvas.height)
+    ctx.scale(1, -1)
+
     ctx.fillStyle = box.textColor
-    ctx.font = '48px Inter, sans-serif'
+    ctx.font = '32px Arial, Helvetica, sans-serif'
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
-    
-    // Word wrap text
-    const maxWidth = canvas.width - 40
-    const lineHeight = 56
-    const words = box.text.split(' ')
-    let line = ''
-    let y = 20
-
+        ctx.font = '32px Courier New, monospace'
+    // Word wrap text, top padding 18px, left padding 18px
+    const maxWidth = canvas.width - 36;
+    const lineHeight = 40;
+    const words = box.text.split(' ');
+    let currentLine = '';
+    const lines: string[] = [];
     for (let i = 0; i < words.length; i++) {
-      const testLine = line + words[i] + ' '
-      const metrics = ctx.measureText(testLine)
+      const testLine = currentLine + words[i] + ' ';
+      const metrics = ctx.measureText(testLine);
       if (metrics.width > maxWidth && i > 0) {
-        ctx.fillText(line, 20, y)
-        line = words[i] + ' '
-        y += lineHeight
+        lines.push(currentLine);
+        currentLine = words[i] + ' ';
       } else {
-        line = testLine
+        currentLine = testLine;
       }
     }
-    ctx.fillText(line, 20, y)
+    lines.push(currentLine);
+
+    // Calculate total text height for vertical centering
+    const totalTextHeight = lines.length * lineHeight;
+    const startY = (canvas.height - totalTextHeight) / 2;
+
+    for (let l = 0; l < lines.length; l++) {
+      const line = lines[l];
+      const letterSpacing = 20;
+      const lineWidth = line.length * letterSpacing;
+      let x = (canvas.width - lineWidth) / 2;
+      for (let c = 0; c < line.length; c++) {
+        ctx.save();
+        ctx.translate(x + letterSpacing / 2, startY + l * lineHeight);
+        ctx.fillText(line[c], 0, 0);
+        ctx.restore();
+        x += letterSpacing;
+      }
+    }
+    ctx.restore();
 
     // Update texture
     textureRef.current.needsUpdate = true
@@ -131,7 +153,7 @@ export default function TextBox({ box, selected, onSelect, onChange, onRemove, o
         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
         const intersection = new THREE.Vector3()
         if (raycaster.ray.intersectPlane(plane, intersection)) {
-          onChange(box.id, { position: [intersection.x, 2.0, intersection.z] })
+          onChange(box.id, { position: [intersection.x, 0.5, intersection.z] })
         }
       }
     }
@@ -139,98 +161,106 @@ export default function TextBox({ box, selected, onSelect, onChange, onRemove, o
     const handleUp = () => {
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
-      
+      window.removeEventListener('mouseup', handleUp)
+
       const wasDragging = dragging
       const moved = movedRef.current
-      
-      if (wasDragging) {
-        setDragging(false)
-        onDragEnd?.()
-      }
-      
+
+      // Always reset dragging state and camera controls immediately
+      setDragging(false)
+      onDragEnd?.()
+
       if (!moved && downInfoRef.current && (performance.now() - downInfoRef.current.t) < 300) {
         // It was a click - enter edit mode
         onSelect(box.id)
       }
-      
+
       downInfoRef.current = null
       movedRef.current = false
     }
 
     document.addEventListener('mousemove', handleMove)
     document.addEventListener('mouseup', handleUp)
+    window.addEventListener('mouseup', handleUp)
   }
 
-  const clampedY = Math.max(box.position[1] ?? 2.0, 2.0)
+  const clampedY = Math.max(box.position[1] ?? 0.5, 0.5)
+
 
   return (
-    <group position={[box.position[0], clampedY, box.position[2]]}>
-      <mesh
-        ref={meshRef}
-        rotation={box.rotation ? new THREE.Euler(box.rotation[0], box.rotation[1], box.rotation[2]) : undefined}
-        onPointerDown={handlePointerDown}
-        onPointerOver={() => !modelDragging && setIsHovered(true)}
-        onPointerOut={() => setIsHovered(false)}
-      >
-        <planeGeometry args={[1.8, 0.9]} />
-        <meshBasicMaterial
-          map={texture ?? undefined}
-          transparent
-          side={THREE.DoubleSide}
-          depthTest
-          depthWrite
-        />
-      </mesh>
-      
-      {/* Editing overlay when selected - stays unrotated */}
+    <>
+      <group position={[box.position[0], clampedY, box.position[2]]} rotation={box.rotation}>
+        <mesh
+          ref={meshRef}
+          onPointerDown={handlePointerDown}
+          onPointerOver={() => !modelDragging && setIsHovered(true)}
+          onPointerOut={() => setIsHovered(false)}
+        >
+          <planeGeometry args={[1.8, 0.9]} />
+          <meshBasicMaterial
+            map={texture ?? undefined}
+            transparent
+            side={THREE.DoubleSide}
+            depthTest
+            depthWrite
+          />
+        </mesh>
+      </group>
       {selected && (
-        <Html center position={[0, 0, 0.01]} transform style={{ pointerEvents: 'auto' }}>
+        <Html center position={[box.position[0], clampedY, box.position[2] + 0.01]} style={{ pointerEvents: 'auto' }}>
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              padding: '2px 4px',
-              backgroundColor: 'rgba(20, 20, 20, 0.9)',
-              border: '1px solid rgba(120, 180, 255, 0.8)',
-              borderRadius: 3,
-              minWidth: 60,
-              maxWidth: 120,
-              fontSize: 7
+              padding: '12px 16px',
+              backgroundColor: 'rgba(20, 20, 20, 0.92)',
+              border: '2px solid rgba(120, 180, 255, 0.85)',
+              borderRadius: 10,
+              minWidth: 180,
+              maxWidth: 320,
+              fontSize: 16
             }}
           >
-            <div
-              contentEditable
-              suppressContentEditableWarning
-              onInput={(e) => {
-                const val = (e.currentTarget as HTMLDivElement).innerText
-                onChange(box.id, { text: val })
+            <textarea
+              value={box.text}
+              onChange={e => {
+                const el = e.target;
+                el.style.height = 'auto';
+                el.style.height = el.scrollHeight + 'px';
+                onChange(box.id, { text: e.target.value, textFieldHeight: el.scrollHeight });
               }}
               style={{
-                minWidth: 50,
-                maxWidth: 120,
-                background: 'transparent',
-                outline: 'none',
+                minWidth: 160,
+                maxWidth: 300,
+                fontSize: 16,
+                marginBottom: 8,
                 color: box.textColor,
-                fontSize: 7,
-                lineHeight: '11px',
+                background: 'transparent',
+                border: '1px solid #888',
+                outline: 'none',
                 fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
                 fontWeight: 500,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                marginBottom: 3
+                resize: 'none',
+                overflow: 'hidden',
+                borderRadius: 4,
+                height: box.textFieldHeight ? box.textFieldHeight : 'auto',
               }}
-            >
-              {box.text}
-            </div>
-            <div style={{ display: 'flex', gap: 4, marginTop: 3, alignItems: 'center', flexWrap: 'wrap', fontSize: 7, lineHeight: '10px' }}>
-              <div style={{ display: 'flex', gap: 3 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              rows={1}
+              ref={el => {
+                if (el && box.textFieldHeight) {
+                  el.style.height = box.textFieldHeight + 'px';
+                }
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 16, lineHeight: '18px', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button
                     title="Text color"
                     onClick={(e) => {
                       e.stopPropagation();
                       (e.currentTarget.nextSibling as HTMLInputElement)?.click()
                     }}
-                    style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid rgba(255,255,255,0.2)', background: box.textColor, cursor: 'pointer' }}
+                    style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid rgba(255,255,255,0.2)', background: box.textColor, cursor: 'pointer' }}
                   />
                   <input
                     type="color"
@@ -239,14 +269,14 @@ export default function TextBox({ box, selected, onSelect, onChange, onRemove, o
                     style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button
                     title="Background color"
                     onClick={(e) => {
                       e.stopPropagation();
                       (e.currentTarget.nextSibling as HTMLInputElement)?.click()
                     }}
-                    style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid rgba(255,255,255,0.2)', background: box.backgroundColor, cursor: 'pointer' }}
+                    style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid rgba(255,255,255,0.2)', background: box.backgroundColor, cursor: 'pointer' }}
                   />
                   <input
                     type="color"
@@ -256,8 +286,8 @@ export default function TextBox({ box, selected, onSelect, onChange, onRemove, o
                   />
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                <span style={{ fontSize: 7, color: '#cfd8dc' }}>Opacity</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 16, color: '#cfd8dc' }}>Opacity</span>
                 <input
                   type="range"
                   min={0}
@@ -265,11 +295,11 @@ export default function TextBox({ box, selected, onSelect, onChange, onRemove, o
                   step={0.05}
                   value={box.backgroundOpacity ?? 1}
                   onChange={(e) => onChange(box.id, { backgroundOpacity: Number(e.target.value) })}
-                  style={{ width: 60, height: 10, padding: 0 }}
+                  style={{ width: 60, height: 12, padding: 0 }}
                 />
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                <span style={{ fontSize: 7, color: '#cfd8dc' }}>Rotation</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 16, color: '#cfd8dc' }}>Rotation</span>
                 <input
                   type="range"
                   min={0}
@@ -280,25 +310,27 @@ export default function TextBox({ box, selected, onSelect, onChange, onRemove, o
                     const angleRad = (Number(e.target.value) * Math.PI) / 180
                     onChange(box.id, { rotation: [0, angleRad, 0] })
                   }}
-                  style={{ width: 60, height: 10, padding: 0 }}
+                  style={{ width: 60, height: 12, padding: 0 }}
                 />
               </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); onRemove(box.id) }}
-                style={{ padding: '3px 6px', borderRadius: 6, background: '#ef4444', color: '#fff', border: 'none', fontSize: 7, fontWeight: 600, cursor: 'pointer' }}
-              >
-                Delete
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); onDone() }}
-                style={{ padding: '3px 6px', borderRadius: 6, background: '#10b981', color: '#fff', border: 'none', fontSize: 7, fontWeight: 600, cursor: 'pointer' }}
-              >
-                Done
-              </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemove(box.id) }}
+                  style={{ padding: '6px 12px', borderRadius: 8, background: '#ef4444', color: '#fff', border: 'none', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDone() }}
+                  style={{ padding: '6px 12px', borderRadius: 8, background: '#10b981', color: '#fff', border: 'none', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         </Html>
       )}
-    </group>
+    </>
   )
 }

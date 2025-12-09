@@ -182,7 +182,7 @@ function SceneContent({
         target={[0, 0, 0]}
         maxPolarAngle={viewMode === '2d' ? 0 : Math.PI}
         minPolarAngle={viewMode === '2d' ? 0 : 0}
-        enabled={!textboxDragging && selectedId === null}
+            enabled={!textboxDragging && selectedId === null}
       />
       
       <Environment preset="sunset" />
@@ -192,7 +192,7 @@ function SceneContent({
           if (activeTool !== 'text-box') return
           e.stopPropagation()
           const point = (e as any).point as THREE.Vector3
-          addBox([point.x, 2.0, point.z])
+          addBox([point.x, point.y, point.z])
           setActiveTool('none')
         }}>
         <planeGeometry args={[15, 15]} />
@@ -329,16 +329,29 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
         ))}
       </Canvas>
 
-      {/* Simple toolbar to enable Text Box tool */}
-      <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 8 }}>
-        <button onClick={() => setActiveTool(activeTool === 'text-box' ? 'none' : 'text-box')}
-          style={{ padding: '6px 10px', background: activeTool === 'text-box' ? '#66aaff' : '#222', color: '#fff', borderRadius: 4 }}>
-          Text Box Tool
-        </button>
+      <div style={{ position: 'absolute', top: 24, left: 24, zIndex: 10, minWidth: 260 }}>
+          <button
+            onClick={() => setActiveTool(activeTool === 'text-box' ? 'none' : 'text-box')}
+            style={{
+              width: '100%',
+              padding: '12px 0',
+              fontSize: '1.1rem',
+              fontWeight: 600,
+              background: activeTool === 'text-box' ? '#222' : '#222',
+              color: '#fff',
+              border: '1px solid #444',
+              borderRadius: 12,
+              boxShadow: '0 2px 12px rgba(0,0,0,0.22)',
+              letterSpacing: '0.02em',
+              cursor: 'pointer',
+              marginBottom: 18,
+              transition: 'background 0.2s',
+              outline: activeTool === 'text-box' ? '2px solid #66aaff' : 'none'
+            }}
+          >
+            Text Box Tool
+          </button>
       </div>
-
-      
-      
       <div className="dual-rotation-controls">
         <h3>Model Rotation Controls</h3>
         
