@@ -32,6 +32,7 @@ export default function TextBox({
   const [texture, setTexture] = useState<THREE.CanvasTexture | null>(null);
   const [dragging, setDragging] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [textFieldHeight, setTextFieldHeight] = useState<number | undefined>(undefined);
   const downInfoRef = useRef<{
     screenX: number;
     screenY: number;
@@ -259,10 +260,11 @@ export default function TextBox({
               onChange={(e) => {
                 const el = e.target;
                 el.style.height = "auto";
-                el.style.height = el.scrollHeight + "px";
+                const newHeight = el.scrollHeight;
+                el.style.height = newHeight + "px";
+                setTextFieldHeight(newHeight);
                 onChange(box.id, {
                   text: e.target.value,
-                  textFieldHeight: el.scrollHeight,
                 });
               }}
               style={{
@@ -280,12 +282,12 @@ export default function TextBox({
                 resize: "none",
                 overflow: "hidden",
                 borderRadius: 4,
-                height: box.textFieldHeight ? box.textFieldHeight : "auto",
+                height: textFieldHeight ? textFieldHeight : "auto",
               }}
               rows={1}
               ref={(el) => {
-                if (el && box.textFieldHeight) {
-                  el.style.height = box.textFieldHeight + "px";
+                if (el && textFieldHeight) {
+                  el.style.height = textFieldHeight + "px";
                 }
               }}
             />
