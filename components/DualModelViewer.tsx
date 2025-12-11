@@ -144,6 +144,24 @@ function DraggableModel({
   );
 }
 
+interface SceneContentProps {
+  viewMode: "3d" | "2d";
+  model1Position: [number, number, number];
+  model1Rotation: number;
+  model2Position: [number, number, number];
+  model2Rotation: number;
+  onModel1PositionChange: (position: [number, number, number]) => void;
+  onModel2PositionChange: (position: [number, number, number]) => void;
+  model1Ref: React.MutableRefObject<Group | null>;
+  model2Ref: React.MutableRefObject<Group | null>;
+  activeTool: "none" | "text-box";
+  addBox: (position: [number, number, number]) => void;
+  setActiveTool: (tool: "none" | "text-box") => void;
+  textboxDragging: boolean;
+  selectedId: string | null;
+  onModelDragChange: (dragging: boolean) => void;
+}
+
 function SceneContent({
   viewMode,
   model1Position,
@@ -160,7 +178,7 @@ function SceneContent({
   textboxDragging,
   selectedId,
   onModelDragChange,
-}) {
+}: SceneContentProps) {
   const orbitControlsRef = useRef<any>(null);
 
   return (
