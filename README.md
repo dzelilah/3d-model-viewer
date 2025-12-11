@@ -1,4 +1,9 @@
+
 # 3D Model Viewer
+
+## Live Demo
+
+[View the deployed app on Vercel](https://3d-model-viewer-demo.vercel.app/)
 
 An interactive 3D web application for managing and manipulating GLB 3D models with real-time Firebase synchronization.
 
