@@ -31,11 +31,9 @@ export function useDragControls(
       setOriginalPosition(position);
       gl.domElement.style.cursor = "grabbing";
 
-      // Disable all camera interactions during drag
       if (orbitControlsRef.current) {
         const oc = orbitControlsRef.current;
         oc.enabled = false;
-        // Also disable specific interactions to be safe
         (oc as any)._prevRotate = oc.enableRotate;
         (oc as any)._prevZoom = oc.enableZoom;
         (oc as any)._prevPan = oc.enablePan;
@@ -44,13 +42,11 @@ export function useDragControls(
         oc.enablePan = false;
       }
 
-      // Track initial mouse to gate accidental drags when orbiting
       const startX = startClient.x;
       const startY = startClient.y;
-      const dragThreshold = 3; // pixels
+      const dragThreshold = 3; 
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
-        // Only engage drag logic after small movement threshold
         const moved =
           Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) >=
           dragThreshold;
@@ -70,7 +66,6 @@ export function useDragControls(
           meshRef.current
         ) {
           meshRef.current.position.set(intersection.x, 0, intersection.z);
-          // Check collision during drag with the model group
           const modelPosition = new Vector3(intersection.x, 0, intersection.z);
           updateCollisionWarning(meshRef.current, modelPosition);
         }
@@ -100,7 +95,6 @@ export function useDragControls(
     onDragStateChange?.(false);
     gl.domElement.style.cursor = "auto";
 
-    // Re-enable camera interactions after drag
     if (orbitControlsRef.current) {
       const oc = orbitControlsRef.current;
       oc.enabled = true;
@@ -112,7 +106,6 @@ export function useDragControls(
       delete (oc as any)._prevPan;
     }
 
-    // Check for collision at the final position
     if (meshRef.current) {
       const finalPosition = new Vector3(
         meshRef.current.position.x,
@@ -126,11 +119,9 @@ export function useDragControls(
       );
 
       if (hasCollision) {
-        // Collision detected - snap back to original position
         meshRef.current.position.set(...originalPosition);
         setPosition(originalPosition);
       } else {
-        // No collision - commit the new position
         const newPosition: [number, number, number] = [
           meshRef.current.position.x,
           meshRef.current.position.y,
@@ -141,7 +132,6 @@ export function useDragControls(
       }
     }
 
-    // Reset collision warning after checking
     resetCollisionWarning();
 
     const element = gl.domElement as HTMLCanvasElement & {
@@ -198,7 +188,6 @@ export function useDragControls(
       movedEnoughRef.current = false;
       if (!isClick) return;
 
-      // Toggle pick/drop only on true click
       if (isDragging) {
         finishDrag();
       } else {

@@ -13,7 +13,6 @@ export function useCollisionDetection(
   otherModelRef: React.MutableRefObject<Group<Object3DEventMap> | null>
 ) {
   const [isCollisionWarning, setIsCollisionWarning] = useState(false);
-  // Optional caches if we need to avoid recomputing, but we'll compute precisely each check
   const otherHalfExtentsRef = useRef<{ hx: number; hz: number } | null>(null);
   const selfHalfExtentsRef = useRef<{ hx: number; hz: number } | null>(null);
   const otherCenterOffsetRef = useRef<{ cx: number; cz: number } | null>(null);
@@ -87,7 +86,6 @@ export function useCollisionDetection(
 
   const computeXZFootprintPoints = useCallback(
     (root: Group): Array<{ x: number; z: number }> => {
-      // Compute tight contact patch by using vertices near the lowest Y (ground contact)
       const allPoints: Array<{ x: number; y: number; z: number }> = [];
       const worldMatrix = new Matrix4();
       root.updateWorldMatrix(true, true);
@@ -105,12 +103,10 @@ export function useCollisionDetection(
         }
       });
       if (allPoints.length === 0) return [];
-      // Find lowest Y and keep points within a small band above it
       let minY = Infinity;
       for (const p of allPoints) if (p.y < minY) minY = p.y;
-      const band = 0.02; // 2cm band; adjust if needed
+      const band = 0.02; 
       const contact = allPoints.filter((p) => p.y <= minY + band);
-      // Fallback to all points if too few
       const source = contact.length >= 8 ? contact : allPoints;
       return source.map((p) => ({ x: p.x, z: p.z }));
     },
@@ -159,7 +155,6 @@ export function useCollisionDetection(
           const p1 = poly[i];
           const p2 = poly[(i + 1) % poly.length];
           const edge = { x: p2.x - p1.x, z: p2.z - p1.z };
-          // perpendicular axis
           const axis = { x: -edge.z, z: edge.x };
           const len = Math.hypot(axis.x, axis.z);
           if (len > 0) axes.push({ x: axis.x / len, z: axis.z / len });
@@ -177,12 +172,10 @@ export function useCollisionDetection(
         }
         return { min, max };
       };
-      // Margin controls how early corners block; lower = closer placement
       const margin = 0.7;
       for (const axis of axes) {
         const a = project(polyA, axis);
         const b = project(polyB, axis);
-        // tightened overlap: consider near-touching as intersection by adding margin
         if (a.max + margin <= b.min || b.max + margin <= a.min) return false;
       }
       return true;
@@ -194,7 +187,6 @@ export function useCollisionDetection(
     (modelGroup: Group, newPosition: Vector3): boolean => {
       if (!otherModelRef.current || !modelGroup) return false;
 
-      // Compute precise XZ footprints from vertices (cached)
       if (!otherHalfExtentsRef.current && otherModelRef.current) {
         otherHalfExtentsRef.current = computeXZFootprintHalfExtents(
           otherModelRef.current
@@ -205,7 +197,6 @@ export function useCollisionDetection(
           cz: oc.cz - otherModelRef.current.position.z,
         };
       }
-      // Recompute self each call in case of dynamic scale/mesh changes
       selfHalfExtentsRef.current = computeXZFootprintHalfExtents(modelGroup);
       const sc = computeXZFootprintCenter(modelGroup);
       selfCenterOffsetRef.current = {
@@ -213,7 +204,6 @@ export function useCollisionDetection(
         cz: sc.cz - modelGroup.position.z,
       };
 
-      // Build precise convex hull polygons at proposed positions
       const selfPoints = computeXZFootprintPoints(modelGroup).map((p) => ({
         x: p.x + (newPosition.x - modelGroup.position.x),
         z: p.z + (newPosition.z - modelGroup.position.z),
@@ -221,8 +211,6 @@ export function useCollisionDetection(
       const otherPoints = computeXZFootprintPoints(otherModelRef.current);
       const selfHull = convexHullXZ(selfPoints);
       const otherHull = convexHullXZ(otherPoints);
-      // Use true footprint centers by applying center offsets to positions
-      // SAT intersection: only true overlap blocks, edge-touching allowed
       const intersects = polygonsIntersectSAT(selfHull, otherHull);
 
       console.log("SAT polygons XZ:", {
@@ -255,7 +243,6 @@ export function useCollisionDetection(
   };
 }
 
-// Reusable XZ collision check between two model groups using ground-contact convex hulls
 export function checkGroupsIntersectXZ(
   a: Group,
   b: Group,

@@ -32,7 +32,18 @@ export default function TextBox({
   const [texture, setTexture] = useState<THREE.CanvasTexture | null>(null);
   const [dragging, setDragging] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const [textFieldHeight, setTextFieldHeight] = useState<number | undefined>(undefined);
+  const [textFieldHeight, setTextFieldHeight] = useState<number | undefined>(
+    undefined
+  );
+
+  useEffect(() => {
+    if (box.id) {
+      const savedHeight = localStorage.getItem(`textbox-height-${box.id}`);
+      if (savedHeight) {
+        setTextFieldHeight(Number(savedHeight));
+      }
+    }
+  }, [box.id]);
   const downInfoRef = useRef<{
     screenX: number;
     screenY: number;
@@ -41,7 +52,6 @@ export default function TextBox({
   const movedRef = useRef(false);
   const { camera, raycaster, gl } = useThree();
 
-  // Create and update canvas texture
   useEffect(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
@@ -60,7 +70,6 @@ export default function TextBox({
     };
   }, []);
 
-  // Render text to canvas
   useEffect(() => {
     if (!canvasRef.current || !textureRef.current) return;
 
@@ -68,28 +77,23 @@ export default function TextBox({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Parse background color with opacity
     const bgHex = box.backgroundColor;
     const bgOpacity = box.backgroundOpacity ?? 1;
     const r = parseInt(bgHex.slice(1, 3), 16);
     const g = parseInt(bgHex.slice(3, 5), 16);
     const b = parseInt(bgHex.slice(5, 7), 16);
 
-    // Draw background
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${bgOpacity})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw border 
     if (selected) {
       ctx.strokeStyle = "rgba(120, 180, 255, 0.8)";
       ctx.lineWidth = 4;
       ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
     }
 
-    // Flip canvas horizontally and vertically to mirror text up and to the right
     ctx.save();
     ctx.translate(0, canvas.height);
     ctx.scale(1, -1);
@@ -99,7 +103,6 @@ export default function TextBox({
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.font = "32px Courier New, monospace";
-    // Word wrap text, top padding 18px, left padding 18px
     const maxWidth = canvas.width - 36;
     const lineHeight = 40;
     const words = box.text.split(" ");
@@ -117,7 +120,6 @@ export default function TextBox({
     }
     lines.push(currentLine);
 
-    // Calculate total text height for vertical centering
     const totalTextHeight = lines.length * lineHeight;
     const startY = (canvas.height - totalTextHeight) / 2;
 
@@ -136,7 +138,6 @@ export default function TextBox({
     }
     ctx.restore();
 
-    // Update texture
     textureRef.current.needsUpdate = true;
   }, [
     box.text,
@@ -168,7 +169,6 @@ export default function TextBox({
           onDragStart?.();
         }
 
-        // Raycast to ground plane
         const rect = gl.domElement.getBoundingClientRect();
         const ndc = new THREE.Vector2(
           ((me.clientX - rect.left) / rect.width) * 2 - 1,
@@ -191,7 +191,6 @@ export default function TextBox({
       const wasDragging = dragging;
       const moved = movedRef.current;
 
-      // Always reset dragging state and camera controls immediately
       setDragging(false);
       onDragEnd?.();
 
@@ -200,7 +199,6 @@ export default function TextBox({
         downInfoRef.current &&
         performance.now() - downInfoRef.current.t < 300
       ) {
-        // It click, enter edit mode
         onSelect(box.id);
       }
 
@@ -263,6 +261,10 @@ export default function TextBox({
                 const newHeight = el.scrollHeight;
                 el.style.height = newHeight + "px";
                 setTextFieldHeight(newHeight);
+                localStorage.setItem(
+                  `textbox-height-${box.id}`,
+                  String(newHeight)
+                );
                 onChange(box.id, {
                   text: e.target.value,
                 });

@@ -4,12 +4,12 @@ An interactive 3D web application for managing and manipulating GLB 3D models wi
 
 ## Interface
 
-![3D Model Viewer Interface](public/demo/3Dview.png)
-![2D Model Viewer Interface](public/demo/2Dview.png)
+![3D Model Viewer Interface](public/demo/VIEW3D.png)
+![2D Model Viewer Interface](public/demo/VIEW2D.png)
 
 ## Features Demo
 
-![Features Demo](public/demo/demo3DModelViewer.gif)
+![Features Demo](public/demo/FINALdemo3DModelViewer.gif)
 
 ## Overview
 

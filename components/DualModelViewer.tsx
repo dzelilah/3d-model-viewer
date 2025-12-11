@@ -35,6 +35,7 @@ function DraggableModel({
   modelPath,
   position: externalPosition,
   rotation: externalRotation,
+  modelName,
   orbitControlsRef,
   otherModelRef,
   modelRef,
@@ -42,15 +43,14 @@ function DraggableModel({
   onDragStateChange,
 }: DraggableModelProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const { scene: gltfScene } = useGLTF(modelPath);
   const [position, setPosition] =
     useState<[number, number, number]>(externalPosition);
-  const { scene: gltfScene } = useGLTF(modelPath);
-
   const {
-    updateCollisionWarning,
-    resetCollisionWarning,
     isCollisionWarning,
     checkCollisionAtPosition,
+    updateCollisionWarning,
+    resetCollisionWarning,
   } = useCollisionDetection(otherModelRef);
   const { setHoverCursor } = useVisualFeedback();
   const {
@@ -80,7 +80,6 @@ function DraggableModel({
     meshRef.current.rotation.set(0, (externalRotation / 100) * Math.PI * 2, 0);
   }, [position, externalRotation]);
 
-  // Sync with external position changes
   useEffect(() => setPosition(externalPosition), [externalPosition]);
 
   useEffect(() => {
@@ -161,22 +160,6 @@ function SceneContent({
   textboxDragging,
   selectedId,
   onModelDragChange,
-}: {
-  viewMode: "3d" | "2d";
-  model1Position: [number, number, number];
-  model1Rotation: number;
-  model2Position: [number, number, number];
-  model2Rotation: number;
-  onModel1PositionChange: (position: [number, number, number]) => void;
-  onModel2PositionChange: (position: [number, number, number]) => void;
-  model1Ref: React.MutableRefObject<Group | null>;
-  model2Ref: React.MutableRefObject<Group | null>;
-  activeTool: "none" | "text-box";
-  addBox: (position: [number, number, number]) => void;
-  setActiveTool: (tool: "none" | "text-box") => void;
-  textboxDragging: boolean;
-  selectedId: string | null;
-  onModelDragChange: (dragging: boolean) => void;
 }) {
   const orbitControlsRef = useRef<any>(null);
 
@@ -200,7 +183,7 @@ function SceneContent({
       <Environment preset="sunset" />
 
       <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
+        rotation={viewMode === "2d" ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
         position={[0, 0, 0]}
         onPointerDown={(e) => {
           if (activeTool !== "text-box") return;
@@ -214,9 +197,13 @@ function SceneContent({
         <meshStandardMaterial color="#333" transparent opacity={0.3} />
       </mesh>
 
-      {/* Grid for 2D view */}
       {viewMode === "2d" && (
-        <gridHelper args={[15, 30, 0x444444, 0x444444]} position={[0, 0, 0]} />
+        <gridHelper
+          args={[15, 30, 0x444444, 0x444444]}
+          position={[0, 0, 0]}
+          rotation={[0, 0, 0]}
+          key="fixed-2d-grid"
+        />
       )}
 
       <DraggableModel
@@ -304,26 +291,24 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
     <div style={{ width: "100%", height: "600px", position: "relative" }}>
       <Canvas
         orthographic={viewMode === "2d"}
-        camera={{
-          ...(viewMode === "2d"
+        camera={
+          viewMode === "2d"
             ? {
-                position: [0, 10, 0] as [number, number, number],
-                rotation: [-Math.PI / 2, 0, 0] as [number, number, number],
-                fov: 50,
+                position: [0, 20, 0] as [number, number, number],
+                up: [0, 0, -1] as [number, number, number],
                 near: 0.1,
                 far: 1000,
-                zoom: 100,
+                zoom: 60,
               }
             : {
                 position: [0, 4, 12] as [number, number, number],
                 fov: 60,
                 zoom: 1,
-              }),
-        }}
+              }
+        }
         style={{ width: "100%", height: "100%" }}
         onPointerDown={(e) => {
           if (activeTool !== "text-box") return;
-          // Place a text box at clicked ground position
           const ndc = {
             x: (e.clientX / (e.target as HTMLElement).clientWidth) * 2 - 1,
             y: -(e.clientY / (e.target as HTMLElement).clientHeight) * 2 + 1,
@@ -353,7 +338,6 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
           selectedId={selectedId}
           onModelDragChange={setModelDragging}
         />
-        {/* Render text boxes inside the Canvas so Html can attach to 3D */}
         {boxes.map((b) => (
           <TextBox
             key={b.id}
@@ -416,7 +400,6 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
               value={model1.rotation}
               onChange={(e) => {
                 const proposed = Number(e.target.value);
-                // Tentatively rotate the group, check intersection, then revert
                 if (model1Ref.current && model2Ref.current) {
                   const g = model1Ref.current;
                   const prevY = g.rotation.y;
