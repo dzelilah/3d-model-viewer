@@ -133,7 +133,7 @@ function DraggableModel({
           <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <circleGeometry args={[2.0, 32]} />
             <meshBasicMaterial
-              color={isCollisionWarning ? "#ff4444" : "#44ff44"}
+              color="#44ff44"
               transparent
               opacity={0.3}
             />

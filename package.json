@@ -9,10 +9,16 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@gltf-transform/core": "^4.2.1",
+    "@gltf-transform/extensions": "^4.2.1",
+    "@gltf-transform/functions": "^4.2.1",
     "@react-three/drei": "^9.88.17",
     "@react-three/fiber": "^8.15.11",
+    "canvas": "^3.2.0",
     "firebase": "^10.7.1",
+    "jsdom": "^27.3.0",
     "next": "^13.4.19",
+    "puppeteer": "^24.34.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "three": "^0.168.0"
