@@ -20,14 +20,12 @@ export function useDragControls(
   activeCameraRef?: React.MutableRefObject<any>,
   modelLocalOffsetRef?: React.MutableRefObject<Vector3 | null>
 ) {
-  // Track last valid 2D drag position
   const last2DDragPosition = useRef<[number, number, number] | null>(null);
   const meshRef = useRef<Group>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [originalPosition, setOriginalPosition] =
     useState<[number, number, number]>(position);
   const { camera, raycaster, gl } = useThree();
-  // Helper to get pointer coords in NDC
   const toPointer = (clientX: number, clientY: number) => {
     const rect = gl.domElement.getBoundingClientRect();
     return new Vector2(
@@ -41,21 +39,11 @@ export function useDragControls(
       if (event.button !== 0) return;
       if (!meshRef.current) return;
 
-
-
-
-      // Use explicit camera if provided
       const activeCamera = activeCameraRef?.current ?? camera;
       activeCamera.updateMatrixWorld(true);
       const pointer = toPointer(event.clientX, event.clientY);
       raycaster.setFromCamera(pointer, activeCamera);
 
-      // For 2D, set last2DPointer to the initial click position and move the model there
-      if (viewMode === "2d" && meshRef.current) {
-        // No-op: 2D drag is handled by mousemove, not here
-      }
-
-      // Collect all visible mesh children in the group
       let meshList: Object3D[] = [];
       if (meshRef.current) {
         meshRef.current.traverse((obj) => {
@@ -68,7 +56,7 @@ export function useDragControls(
       const intersects = raycaster.intersectObjects(meshList, false);
       if (!intersects.length) return;
 
-      if (viewMode !== "2d") {
+      if (viewMode === "2d") {
         event.stopPropagation();
       }
       setIsDragging(true);
@@ -89,7 +77,6 @@ export function useDragControls(
         oc.enablePan = false;
       }
 
-      // Unified drag logic: on mousedown, model follows mouse until mouseup, for both 2D and 3D
       const handleMouseMove = (moveEvent: MouseEvent) => {
         const is2D = viewMode === "2d";
         const activeCamera = activeCameraRef?.current ?? camera;
@@ -98,8 +85,7 @@ export function useDragControls(
         raycaster.setFromCamera(mouse, activeCamera);
 
         if (is2D) {
-          // 2D: block movement if collision detected (margin 0.7)
-          const groundPlane = new Plane(new Vector3(0, 1, 0), 0); // y=0 plane
+          const groundPlane = new Plane(new Vector3(0, 1, 0), 0); 
           const intersection = new Vector3();
           if (raycaster.ray.intersectPlane(groundPlane, intersection)) {
             const min = -7.5, max = 7.5;
@@ -111,20 +97,19 @@ export function useDragControls(
             x = Math.max(min, Math.min(max, x));
             z = Math.max(min, Math.min(max, z));
             const newPos: [number, number, number] = [x, 0, z];
-            // Check collision at this new position with a small margin (models can't touch)
-              let blocked = false;
-              if (meshRef.current) {
-                const testVec = new Vector3(x, 0, z);
-                blocked = checkCollisionAtPosition(meshRef.current, testVec, 1.0);
+            let blocked = false;
+            if (meshRef.current) {
+              const testVec = new Vector3(x, 0, z);
+              blocked = checkCollisionAtPosition(meshRef.current, testVec, 1.0);
             }
             if (!blocked) {
               last2DDragPosition.current = newPos;
               onPositionChange(newPos);
+            } else if (last2DDragPosition.current) {
+              onPositionChange(last2DDragPosition.current);
             }
-            // If blocked, do not update position (model stays at last valid position)
           }
         } else if (meshRef.current) {
-          // 3D: update mesh position directly
           const groundPlane = new Plane(new Vector3(0, 1, 0), 0);
           const intersection = new Vector3();
           if (raycaster.ray.intersectPlane(groundPlane, intersection)) {
@@ -159,13 +144,11 @@ export function useDragControls(
 
         if (meshRef.current) {
           if (viewMode === "2d") {
-            // 2D: Commit the last valid dragged position (blocked if collision)
             const dropPos = last2DDragPosition.current ?? [meshRef.current.position.x, 0, meshRef.current.position.z];
             setPosition(dropPos);
             onPositionChange(dropPos);
             last2DDragPosition.current = null;
           } else {
-            // 3D: keep original collision logic
             const finalPosition = new Vector3(
               meshRef.current.position.x,
               meshRef.current.position.y,
@@ -175,7 +158,6 @@ export function useDragControls(
               meshRef.current,
               finalPosition
             );
-            // Only commit position if no collision
             if (hasCollision) {
               meshRef.current.position.set(...originalPosition);
               setPosition(originalPosition);
@@ -193,10 +175,8 @@ export function useDragControls(
 
         resetCollisionWarning();
 
-        // Always re-enable pointer events for future drags
         document.removeEventListener("mousemove", handleMouseMove);
         document.removeEventListener("mouseup", handleMouseUp);
-        // No-op: pointer events are not disabled, so drag can be started again
       };
 
       document.addEventListener("mousemove", handleMouseMove);
@@ -219,7 +199,6 @@ export function useDragControls(
     ]
   );
 
-  // No-op for compatibility with DraggableModel
   const handleModelPointerMove = useCallback(() => {}, []);
   const handleModelPointerUp = useCallback(() => {}, []);
 

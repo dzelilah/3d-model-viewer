@@ -84,7 +84,6 @@ export function useCollisionDetection(
     []
   );
 
-  // Add bandOverride for 2D mode
   const computeXZFootprintPoints = useCallback(
     (root: Group, bandOverride?: number): Array<{ x: number; z: number }> => {
       const allPoints: Array<{ x: number; y: number; z: number }> = [];
@@ -174,7 +173,7 @@ export function useCollisionDetection(
         }
         return { min, max };
       };
-      const margin = marginOverride ?? 0.7;
+      const margin = marginOverride !== undefined ? marginOverride : 0.5;
       for (const axis of axes) {
         const a = project(polyA, axis);
         const b = project(polyB, axis);
@@ -186,7 +185,12 @@ export function useCollisionDetection(
   );
 
   const checkCollisionAtPosition = useCallback(
-    (modelGroup: Group, newPosition: Vector3, marginOverride?: number): boolean => {
+    (
+      modelGroup: Group,
+      newPosition: Vector3,
+      marginOverride?: number,
+      viewMode?: "2d" | "3d"
+    ): boolean => {
       if (!otherModelRef.current || !modelGroup) return false;
 
       if (!otherHalfExtentsRef.current && otherModelRef.current) {
@@ -206,32 +210,32 @@ export function useCollisionDetection(
         cz: sc.cz - modelGroup.position.z,
       };
 
-      // Use a much smaller band for 2D mode to get a tighter collision hull
-      // Detect 2D mode from global window or a static variable (since viewMode is not available here)
-      let is2D = false;
-      if (typeof window !== 'undefined' && window.__DUAL_MODEL_VIEW_MODE === '2d') {
-        is2D = true;
-      }
-      const band = is2D ? 0.001 : 0.02;
-      const selfPoints = computeXZFootprintPoints(modelGroup, band).map((p) => ({
-        x: p.x + (newPosition.x - modelGroup.position.x),
-        z: p.z + (newPosition.z - modelGroup.position.z),
-      }));
+      const band = 0.0001;
+      const selfPoints = computeXZFootprintPoints(modelGroup, band).map(
+        (p) => ({
+          x: p.x + (newPosition.x - modelGroup.position.x),
+          z: p.z + (newPosition.z - modelGroup.position.z),
+        })
+      );
       const otherPoints = computeXZFootprintPoints(otherModelRef.current, band);
       const selfHull = convexHullXZ(selfPoints);
       const otherHull = convexHullXZ(otherPoints);
-      const intersects = polygonsIntersectSAT(selfHull, otherHull, marginOverride);
+      let margin = 0.7;
+      if (viewMode === "3d") margin = 2.5;
+      if (marginOverride !== undefined) margin = marginOverride;
+      const intersects = polygonsIntersectSAT(selfHull, otherHull, margin);
 
-      // Debug: log hulls and band for 2D/3D
+      // Debug: log hulls and band
       console.log("Collision Debug", {
-        is2D,
         band,
         selfHull,
         otherHull,
         selfHullCount: selfHull.length,
         otherHullCount: otherHull.length,
         intersects,
-        marginOverride
+        marginOverride,
+        viewMode,
+        margin,
       });
 
       return intersects;
@@ -291,7 +295,7 @@ export function checkGroupsIntersectXZ(
     if (all.length === 0) return [];
     let minY = Infinity;
     for (const p of all) if (p.y < minY) minY = p.y;
-    const band = options?.band ?? 0.02;
+    const band = options?.band ?? 0.001;
     const contact = all.filter((p) => p.y <= minY + band);
     const src = contact.length >= 8 ? contact : all;
     return src.map((p) => ({ x: p.x, z: p.z }));
@@ -330,7 +334,9 @@ export function checkGroupsIntersectXZ(
 
   const polygonsIntersectSAT = (
     polyA: Array<{ x: number; z: number }>,
-    polyB: Array<{ x: number; z: number }>
+    polyB: Array<{ x: number; z: number }>,
+    marginOverride?: number,
+    viewMode?: "2d" | "3d"
   ) => {
     const axes: Array<{ x: number; z: number }> = [];
     const addAxes = (poly: any[]) => {
@@ -355,7 +361,9 @@ export function checkGroupsIntersectXZ(
       }
       return { min, max };
     };
-    const margin = options?.margin ?? 0.6;
+    let margin = 2.5;
+    if (viewMode === "2d") margin = 0.7;
+    if (marginOverride !== undefined) margin = marginOverride;
     for (const axis of axes) {
       const aProj = project(polyA, axis);
       const bProj = project(polyB, axis);
@@ -369,5 +377,6 @@ export function checkGroupsIntersectXZ(
   const bPts = toGroundFootprint(gatherPoints(b));
   const aHull = convexHullXZ(aPts);
   const bHull = convexHullXZ(bPts);
-  return polygonsIntersectSAT(aHull, bHull);
+  const viewMode = (options && (options as any).viewMode) || undefined;
+  return polygonsIntersectSAT(aHull, bHull, options?.margin, viewMode);
 }
