@@ -199,8 +199,16 @@ export function useDragControls(
     ]
   );
 
-  const handleModelPointerMove = useCallback(() => {}, []);
-  const handleModelPointerUp = useCallback(() => {}, []);
+
+  const handleModelPointerMove = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!isDragging) return;
+    event.stopPropagation();
+  }, [isDragging]);
+
+  const handleModelPointerUp = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!isDragging) return;
+    event.stopPropagation();
+  }, [isDragging]);
 
   return {
     meshRef,

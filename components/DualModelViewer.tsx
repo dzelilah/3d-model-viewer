@@ -148,23 +148,32 @@ function DraggableModel({
     setHoverCursor(false);
   };
 
-  const pointerHandlers = (() => {
-    if (viewMode === "2d") {
-      const anyDragging = model1Dragging2D || model2Dragging2D;
-      if (anyDragging && !dragging) {
-        return {
-          onPointerDown: undefined,
-          onPointerMove: undefined,
-          onPointerUp: undefined,
-        };
+  const dragLockRef = (typeof window !== 'undefined') ? (window as any).__DRAG_LOCK_REF = (window as any).__DRAG_LOCK_REF || { current: null } : { current: null };
+  const pointerHandlers = {
+    onPointerDown: (event: any) => {
+      if (dragLockRef.current && dragLockRef.current !== modelName) {
+        event.stopPropagation();
+        return;
       }
-    }
-    return {
-      onPointerDown: handleModelPointerDown,
-      onPointerMove: handleModelPointerMove,
-      onPointerUp: handleModelPointerUp,
-    };
-  })();
+      dragLockRef.current = modelName;
+      handleModelPointerDown(event);
+    },
+    onPointerMove: (event: any) => {
+      if (dragLockRef.current && dragLockRef.current !== modelName) {
+        event.stopPropagation();
+        return;
+      }
+      handleModelPointerMove(event);
+    },
+    onPointerUp: (event: any) => {
+      if (dragLockRef.current && dragLockRef.current !== modelName) {
+        event.stopPropagation();
+        return;
+      }
+      handleModelPointerUp(event);
+      dragLockRef.current = null;
+    },
+  };
 
   return (
     <>
