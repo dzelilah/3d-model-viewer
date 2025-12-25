@@ -1,5 +1,5 @@
 "use client";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment, useGLTF } from "@react-three/drei";
 import { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { useState, useRef, useEffect } from "react";
@@ -17,6 +17,7 @@ import { useTextBoxes } from "../hooks/useTextBoxes";
 
 interface DualModelViewerProps {
   viewMode: "3d" | "2d";
+  pointerEvents?: string;
 }
 
 interface DraggableModelProps {
@@ -29,6 +30,9 @@ interface DraggableModelProps {
   modelRef: React.MutableRefObject<Group | null>;
   onPositionChange: (position: [number, number, number]) => void;
   onDragStateChange?: (dragging: boolean) => void;
+  viewMode: "3d" | "2d";
+  model1Dragging2D?: boolean;
+  model2Dragging2D?: boolean;
 }
 
 function DraggableModel({
@@ -41,18 +45,52 @@ function DraggableModel({
   modelRef,
   onPositionChange,
   onDragStateChange,
-}: DraggableModelProps) {
+  viewMode,
+  model1Dragging2D,
+  model2Dragging2D,
+  }: DraggableModelProps) {
+    // Flatten model in 2D mode (sticker effect), but only slightly for the table
+    useEffect(() => {
+      if (!meshRef.current) return;
+      // Only scale Y, do not touch rotation
+      if (viewMode === "2d") {
+        if (modelName === "Table") {
+          meshRef.current.scale.y = 0.12; // slightly flattened for table
+        } else {
+          meshRef.current.scale.y = 0.001; // full flatten for ottoman or others
+        }
+      } else {
+        meshRef.current.scale.y = 1;
+      }
+    }, [viewMode, modelName]);
   const [isHovered, setIsHovered] = useState(false);
   const { scene: gltfScene } = useGLTF(modelPath);
-  const [position, setPosition] =
-    useState<[number, number, number]>(externalPosition);
+  // Remove local position state; always use externalPosition and onPositionChange
   const {
     isCollisionWarning,
-    checkCollisionAtPosition,
+    checkCollisionAtPosition: baseCheckCollisionAtPosition,
     updateCollisionWarning,
     resetCollisionWarning,
   } = useCollisionDetection(otherModelRef);
+
+  // Always provide a 3-argument version for useDragControls, with correct types
+  // Set a global flag for 2d/3d mode so collision detection can use it
+  if (typeof window !== 'undefined') {
+    window.__DUAL_MODEL_VIEW_MODE = viewMode;
+  }
+  const checkCollisionAtPosition = (
+    modelGroup: Group,
+    newPosition: THREE.Vector3,
+    margin?: number
+  ): boolean => baseCheckCollisionAtPosition(modelGroup, newPosition, margin);
   const { setHoverCursor } = useVisualFeedback();
+  // Local state for drag, but always render from Firestore except while dragging
+  const [dragPosition, setDragPosition] = useState(externalPosition);
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    if (!dragging) setDragPosition(externalPosition);
+  }, [externalPosition, dragging]);
+
   const {
     meshRef,
     isDragging,
@@ -61,13 +99,15 @@ function DraggableModel({
     handleModelPointerUp,
   } = useDragControls(
     orbitControlsRef,
-    onPositionChange,
+    (pos) => { setDragPosition(pos); }, // Only update local drag state
     updateCollisionWarning,
     checkCollisionAtPosition,
     resetCollisionWarning,
-    position,
-    setPosition,
-    onDragStateChange
+    dragging ? dragPosition : externalPosition,
+    // On drop, sync to Firestore and stop using local drag state
+    (pos) => { setDragPosition(pos); onPositionChange(pos); setDragging(false); },
+    (d) => { setDragging(d); onDragStateChange?.(d); },
+    viewMode
   );
 
   useEffect(() => {
@@ -76,11 +116,17 @@ function DraggableModel({
 
   useEffect(() => {
     if (!meshRef.current) return;
-    meshRef.current.position.set(...position);
+    const pos = dragging ? dragPosition : externalPosition;
+    meshRef.current.position.set(...pos);
+    // Always apply rotation around Y axis for both 2D and 3D
     meshRef.current.rotation.set(0, (externalRotation / 100) * Math.PI * 2, 0);
-  }, [position, externalRotation]);
+    // Also apply rotation to the gltfScene primitive for 2D
+    if (gltfScene) {
+      gltfScene.rotation.set(0, (externalRotation / 100) * Math.PI * 2, 0);
+    }
+  }, [dragging, dragPosition, externalPosition, externalRotation, gltfScene]);
 
-  useEffect(() => setPosition(externalPosition), [externalPosition]);
+  // No local position state to sync
 
   useEffect(() => {
     if (!gltfScene || !meshRef.current) return;
@@ -100,13 +146,49 @@ function DraggableModel({
     setHoverCursor(false);
   };
 
+  // Conditionally disable pointer event handlers for non-draggable model in 2D
+  const pointerHandlers =
+    viewMode === "2d"
+      ? modelName === "Table"
+        ? (model2Dragging2D
+            ? {
+                onPointerDown: undefined,
+                onPointerMove: undefined,
+                onPointerUp: undefined,
+              }
+            : {
+                onPointerDown: handleModelPointerDown,
+                onPointerMove: handleModelPointerMove,
+                onPointerUp: handleModelPointerUp,
+              })
+        : modelName === "Ottoman"
+        ? (model1Dragging2D
+            ? {
+                onPointerDown: undefined,
+                onPointerMove: undefined,
+                onPointerUp: undefined,
+              }
+            : {
+                onPointerDown: handleModelPointerDown,
+                onPointerMove: handleModelPointerMove,
+                onPointerUp: handleModelPointerUp,
+              })
+        : {
+            onPointerDown: handleModelPointerDown,
+            onPointerMove: handleModelPointerMove,
+            onPointerUp: handleModelPointerUp,
+          }
+      : {
+          onPointerDown: handleModelPointerDown,
+          onPointerMove: handleModelPointerMove,
+          onPointerUp: handleModelPointerUp,
+        };
+
   return (
     <>
       <group
         ref={meshRef}
-        onPointerDown={handleModelPointerDown}
-        onPointerMove={handleModelPointerMove}
-        onPointerUp={handleModelPointerUp}
+        {...pointerHandlers}
         onPointerEnter={() => {
           setIsHovered(true);
           setHoverCursor(true);
@@ -160,6 +242,10 @@ interface SceneContentProps {
   textboxDragging: boolean;
   selectedId: string | null;
   onModelDragChange: (dragging: boolean) => void;
+  model1Dragging2D: boolean;
+  model2Dragging2D: boolean;
+  setModel1Dragging2D: (dragging: boolean) => void;
+  setModel2Dragging2D: (dragging: boolean) => void;
 }
 
 function SceneContent({
@@ -178,8 +264,50 @@ function SceneContent({
   textboxDragging,
   selectedId,
   onModelDragChange,
+  model1Dragging2D,
+  model2Dragging2D,
+  setModel1Dragging2D,
+  setModel2Dragging2D,
 }: SceneContentProps) {
   const orbitControlsRef = useRef<any>(null);
+  const { camera } = useThree();
+  // Store initial 3D camera state
+  const initial3DCamera = useRef<{ position: THREE.Vector3; rotation: THREE.Euler; up: THREE.Vector3 } | null>(null);
+  const prevViewMode = useRef(viewMode);
+
+  useEffect(() => {
+    // On first mount, store the initial 3D camera state
+    if (!initial3DCamera.current && viewMode === "3d") {
+      initial3DCamera.current = {
+        position: camera.position.clone(),
+        rotation: camera.rotation.clone(),
+        up: camera.up.clone(),
+      };
+    }
+  }, [camera, viewMode]);
+
+  useEffect(() => {
+    // When switching to 2d, set top-down camera
+    if (viewMode === "2d") {
+      camera.position.set(0, 20, 0);
+      camera.rotation.set(-Math.PI / 2, 0, 0);
+      camera.up.set(0, 0, -1);
+      camera.updateProjectionMatrix();
+    }
+    // When switching to 3d, restore initial camera state
+    if (viewMode === "3d" && prevViewMode.current === "2d" && initial3DCamera.current) {
+      camera.position.copy(initial3DCamera.current.position);
+      camera.rotation.copy(initial3DCamera.current.rotation);
+      camera.up.copy(initial3DCamera.current.up);
+      camera.updateProjectionMatrix();
+      // Also reset OrbitControls if available
+      if (orbitControlsRef.current) {
+        orbitControlsRef.current.target.set(0, 0, 0);
+        orbitControlsRef.current.update();
+      }
+    }
+    prevViewMode.current = viewMode;
+  }, [viewMode, camera]);
 
   return (
     <>
@@ -189,19 +317,19 @@ function SceneContent({
 
       <OrbitControls
         ref={orbitControlsRef}
-        enablePan={viewMode === "3d"}
         enableRotate={viewMode === "3d"}
+        enablePan={false}
         enableZoom={true}
+        screenSpacePanning={false}
+        enableDamping={false}
         target={[0, 0, 0]}
-        maxPolarAngle={viewMode === "2d" ? 0 : Math.PI}
-        minPolarAngle={viewMode === "2d" ? 0 : 0}
         enabled={!textboxDragging && selectedId === null}
       />
 
       <Environment preset="sunset" />
 
       <mesh
-        rotation={viewMode === "2d" ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0, 0]}
         onPointerDown={(e) => {
           if (activeTool !== "text-box") return;
@@ -233,7 +361,16 @@ function SceneContent({
         otherModelRef={model2Ref}
         modelRef={model1Ref}
         onPositionChange={onModel1PositionChange}
-        onDragStateChange={onModelDragChange}
+        onDragStateChange={(dragging) => {
+          onModelDragChange?.(dragging);
+          if (viewMode === "2d") {
+            setModel1Dragging2D(dragging);
+            if (dragging) setModel2Dragging2D(false);
+          }
+        }}
+        viewMode={viewMode}
+        model1Dragging2D={model1Dragging2D}
+        model2Dragging2D={model2Dragging2D}
       />
 
       <DraggableModel
@@ -245,7 +382,16 @@ function SceneContent({
         otherModelRef={model1Ref}
         modelRef={model2Ref}
         onPositionChange={onModel2PositionChange}
-        onDragStateChange={onModelDragChange}
+        onDragStateChange={(dragging) => {
+          onModelDragChange?.(dragging);
+          if (viewMode === "2d") {
+            setModel2Dragging2D(dragging);
+            if (dragging) setModel1Dragging2D(false);
+          }
+        }}
+        viewMode={viewMode}
+        model1Dragging2D={model1Dragging2D}
+        model2Dragging2D={model2Dragging2D}
       />
     </>
   );
@@ -268,6 +414,8 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
   const model2Ref = useRef<Group>(null);
   const [textboxDragging, setTextboxDragging] = useState(false);
   const [modelDragging, setModelDragging] = useState(false);
+  const [model1Dragging2D, setModel1Dragging2D] = useState(false);
+  const [model2Dragging2D, setModel2Dragging2D] = useState(false);
 
   if (model1.isLoading || model2.isLoading) {
     return (
@@ -307,6 +455,39 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
 
   return (
     <div style={{ width: "100%", height: "600px", position: "relative" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 24,
+          left: 24,
+          zIndex: 10,
+          minWidth: 260,
+        }}
+      >
+        <button
+          onClick={() =>
+            setActiveTool(activeTool === "text-box" ? "none" : "text-box")
+          }
+          style={{
+            width: "100%",
+            padding: "12px 0",
+            fontSize: "1.1rem",
+            fontWeight: 600,
+            background: activeTool === "text-box" ? "#222" : "#222",
+            color: "#fff",
+            border: "1px solid #444",
+            borderRadius: 12,
+            boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
+            letterSpacing: "0.02em",
+            cursor: "pointer",
+            marginBottom: 18,
+            transition: "background 0.2s",
+            outline: activeTool === "text-box" ? "2px solid #66aaff" : "none",
+          }}
+        >
+          Text Box Tool
+        </button>
+      </div>
       <Canvas
         orthographic={viewMode === "2d"}
         camera={
@@ -355,6 +536,10 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
           textboxDragging={textboxDragging}
           selectedId={selectedId}
           onModelDragChange={setModelDragging}
+          model1Dragging2D={model1Dragging2D}
+          model2Dragging2D={model2Dragging2D}
+          setModel1Dragging2D={setModel1Dragging2D}
+          setModel2Dragging2D={setModel2Dragging2D}
         />
         {boxes.map((b) => (
           <TextBox
@@ -372,39 +557,6 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
         ))}
       </Canvas>
 
-      <div
-        style={{
-          position: "absolute",
-          top: 24,
-          left: 24,
-          zIndex: 10,
-          minWidth: 260,
-        }}
-      >
-        <button
-          onClick={() =>
-            setActiveTool(activeTool === "text-box" ? "none" : "text-box")
-          }
-          style={{
-            width: "100%",
-            padding: "12px 0",
-            fontSize: "1.1rem",
-            fontWeight: 600,
-            background: activeTool === "text-box" ? "#222" : "#222",
-            color: "#fff",
-            border: "1px solid #444",
-            borderRadius: 12,
-            boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
-            letterSpacing: "0.02em",
-            cursor: "pointer",
-            marginBottom: 18,
-            transition: "background 0.2s",
-            outline: activeTool === "text-box" ? "2px solid #66aaff" : "none",
-          }}
-        >
-          Text Box Tool
-        </button>
-      </div>
       <div className="dual-rotation-controls">
         <h3>Model Rotation Controls</h3>
 
@@ -419,15 +571,29 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
               onChange={(e) => {
                 const proposed = Number(e.target.value);
                 if (model1Ref.current && model2Ref.current) {
+                  // In 2D, block rotation if it would cause intersection, using the same margin as drag
                   const g = model1Ref.current;
                   const prevY = g.rotation.y;
                   g.rotation.y = (proposed / 100) * Math.PI * 2;
+                  g.updateMatrixWorld(true); // Ensure collision uses updated rotation
+                  const margin = viewMode === "2d" ? 1.2 : 1.2;
+                  const band = viewMode === "2d" ? 0.001 : undefined;
+                  if (viewMode === "2d") {
+                    console.log('2D Rotation Debug', {
+                      margin,
+                      band,
+                      g1: g,
+                      g2: model2Ref.current,
+                      rot: proposed
+                    });
+                  }
                   const intersects = checkGroupsIntersectXZ(
                     g,
                     model2Ref.current,
-                    { margin: 0.8 }
+                    { margin, band }
                   );
                   g.rotation.y = prevY;
+                  g.updateMatrixWorld(true);
                   if (!intersects) {
                     model1.setSyncedRotation(proposed);
                   }
@@ -451,15 +617,29 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
               onChange={(e) => {
                 const proposed = Number(e.target.value);
                 if (model2Ref.current && model1Ref.current) {
+                  // In 2D, block rotation if it would cause intersection, using the same margin as drag
                   const g = model2Ref.current;
                   const prevY = g.rotation.y;
                   g.rotation.y = (proposed / 100) * Math.PI * 2;
+                  g.updateMatrixWorld(true); // Ensure collision uses updated rotation
+                  const margin = viewMode === "2d" ? 1.2 : 1.2;
+                  const band = viewMode === "2d" ? 0.001 : undefined;
+                  if (viewMode === "2d") {
+                    console.log('2D Rotation Debug', {
+                      margin,
+                      band,
+                      g1: g,
+                      g2: model1Ref.current,
+                      rot: proposed
+                    });
+                  }
                   const intersects = checkGroupsIntersectXZ(
                     g,
                     model1Ref.current,
-                    { margin: 0.8 }
+                    { margin, band }
                   );
                   g.rotation.y = prevY;
+                  g.updateMatrixWorld(true);
                   if (!intersects) {
                     model2.setSyncedRotation(proposed);
                   }

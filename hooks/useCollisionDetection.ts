@@ -84,8 +84,9 @@ export function useCollisionDetection(
     []
   );
 
+  // Add bandOverride for 2D mode
   const computeXZFootprintPoints = useCallback(
-    (root: Group): Array<{ x: number; z: number }> => {
+    (root: Group, bandOverride?: number): Array<{ x: number; z: number }> => {
       const allPoints: Array<{ x: number; y: number; z: number }> = [];
       const worldMatrix = new Matrix4();
       root.updateWorldMatrix(true, true);
@@ -105,7 +106,7 @@ export function useCollisionDetection(
       if (allPoints.length === 0) return [];
       let minY = Infinity;
       for (const p of allPoints) if (p.y < minY) minY = p.y;
-      const band = 0.02; 
+      const band = bandOverride !== undefined ? bandOverride : 0.02;
       const contact = allPoints.filter((p) => p.y <= minY + band);
       const source = contact.length >= 8 ? contact : allPoints;
       return source.map((p) => ({ x: p.x, z: p.z }));
@@ -147,7 +148,8 @@ export function useCollisionDetection(
   const polygonsIntersectSAT = useCallback(
     (
       polyA: Array<{ x: number; z: number }>,
-      polyB: Array<{ x: number; z: number }>
+      polyB: Array<{ x: number; z: number }>,
+      marginOverride?: number
     ) => {
       const axes: Array<{ x: number; z: number }> = [];
       const addAxes = (poly: any[]) => {
@@ -172,7 +174,7 @@ export function useCollisionDetection(
         }
         return { min, max };
       };
-      const margin = 0.7;
+      const margin = marginOverride ?? 0.7;
       for (const axis of axes) {
         const a = project(polyA, axis);
         const b = project(polyB, axis);
@@ -184,7 +186,7 @@ export function useCollisionDetection(
   );
 
   const checkCollisionAtPosition = useCallback(
-    (modelGroup: Group, newPosition: Vector3): boolean => {
+    (modelGroup: Group, newPosition: Vector3, marginOverride?: number): boolean => {
       if (!otherModelRef.current || !modelGroup) return false;
 
       if (!otherHalfExtentsRef.current && otherModelRef.current) {
@@ -204,19 +206,32 @@ export function useCollisionDetection(
         cz: sc.cz - modelGroup.position.z,
       };
 
-      const selfPoints = computeXZFootprintPoints(modelGroup).map((p) => ({
+      // Use a much smaller band for 2D mode to get a tighter collision hull
+      // Detect 2D mode from global window or a static variable (since viewMode is not available here)
+      let is2D = false;
+      if (typeof window !== 'undefined' && window.__DUAL_MODEL_VIEW_MODE === '2d') {
+        is2D = true;
+      }
+      const band = is2D ? 0.001 : 0.02;
+      const selfPoints = computeXZFootprintPoints(modelGroup, band).map((p) => ({
         x: p.x + (newPosition.x - modelGroup.position.x),
         z: p.z + (newPosition.z - modelGroup.position.z),
       }));
-      const otherPoints = computeXZFootprintPoints(otherModelRef.current);
+      const otherPoints = computeXZFootprintPoints(otherModelRef.current, band);
       const selfHull = convexHullXZ(selfPoints);
       const otherHull = convexHullXZ(otherPoints);
-      const intersects = polygonsIntersectSAT(selfHull, otherHull);
+      const intersects = polygonsIntersectSAT(selfHull, otherHull, marginOverride);
 
-      console.log("SAT polygons XZ:", {
+      // Debug: log hulls and band for 2D/3D
+      console.log("Collision Debug", {
+        is2D,
+        band,
+        selfHull,
+        otherHull,
         selfHullCount: selfHull.length,
         otherHullCount: otherHull.length,
         intersects,
+        marginOverride
       });
 
       return intersects;

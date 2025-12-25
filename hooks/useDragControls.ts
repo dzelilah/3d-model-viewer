@@ -9,18 +9,32 @@ export function useDragControls(
   updateCollisionWarning: (modelGroup: Group, position: Vector3) => void,
   checkCollisionAtPosition: (
     modelGroup: Group,
-    newPosition: Vector3
+    newPosition: Vector3,
+    margin?: number
   ) => boolean,
   resetCollisionWarning: () => void,
   position: [number, number, number],
   setPosition: (position: [number, number, number]) => void,
-  onDragStateChange?: (dragging: boolean) => void
+  onDragStateChange?: (dragging: boolean) => void,
+  viewMode?: "3d" | "2d",
+  activeCameraRef?: React.MutableRefObject<any>,
+  modelLocalOffsetRef?: React.MutableRefObject<Vector3 | null>
 ) {
+  // Track last valid 2D drag position
+  const last2DDragPosition = useRef<[number, number, number] | null>(null);
   const meshRef = useRef<Group>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [originalPosition, setOriginalPosition] =
     useState<[number, number, number]>(position);
   const { camera, raycaster, gl } = useThree();
+  // Helper to get pointer coords in NDC
+  const toPointer = (clientX: number, clientY: number) => {
+    const rect = gl.domElement.getBoundingClientRect();
+    return new Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+  };
 
   const handleModelPointerDown = useCallback(
     (event: ThreeEvent<PointerEvent>) => {
@@ -28,12 +42,18 @@ export function useDragControls(
       if (!meshRef.current) return;
 
 
-      // Only start drag if the pointer intersects the visible mesh geometry (not group or invisible children)
-      const pointer = new Vector2();
-      const rect = gl.domElement.getBoundingClientRect();
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera);
+
+
+      // Use explicit camera if provided
+      const activeCamera = activeCameraRef?.current ?? camera;
+      activeCamera.updateMatrixWorld(true);
+      const pointer = toPointer(event.clientX, event.clientY);
+      raycaster.setFromCamera(pointer, activeCamera);
+
+      // For 2D, set last2DPointer to the initial click position and move the model there
+      if (viewMode === "2d" && meshRef.current) {
+        // No-op: 2D drag is handled by mousemove, not here
+      }
 
       // Collect all visible mesh children in the group
       let meshList: Object3D[] = [];
@@ -48,10 +68,14 @@ export function useDragControls(
       const intersects = raycaster.intersectObjects(meshList, false);
       if (!intersects.length) return;
 
-      event.stopPropagation();
+      if (viewMode !== "2d") {
+        event.stopPropagation();
+      }
       setIsDragging(true);
       onDragStateChange?.(true);
-      setOriginalPosition(position);
+      if (viewMode !== "2d") {
+        setOriginalPosition(position);
+      }
       gl.domElement.style.cursor = "grabbing";
 
       if (orbitControlsRef.current) {
@@ -65,25 +89,54 @@ export function useDragControls(
         oc.enablePan = false;
       }
 
+      // Unified drag logic: on mousedown, model follows mouse until mouseup, for both 2D and 3D
       const handleMouseMove = (moveEvent: MouseEvent) => {
-        const mouse = new Vector2(
-          ((moveEvent.clientX - rect.left) / rect.width) * 2 - 1,
-          -((moveEvent.clientY - rect.top) / rect.height) * 2 + 1
-        );
+        const is2D = viewMode === "2d";
+        const activeCamera = activeCameraRef?.current ?? camera;
+        activeCamera.updateMatrixWorld(true);
+        const mouse = toPointer(moveEvent.clientX, moveEvent.clientY);
+        raycaster.setFromCamera(mouse, activeCamera);
 
-        raycaster.setFromCamera(mouse, camera);
-        const groundPlane = new Plane(new Vector3(0, 1, 0), 0);
-        const intersection = new Vector3();
-
-        if (
-          raycaster.ray.intersectPlane(groundPlane, intersection) &&
-          meshRef.current
-        ) {
-          const modelPosition = new Vector3(intersection.x, 0, intersection.z);
-          const willCollide = checkCollisionAtPosition(meshRef.current, modelPosition);
-          updateCollisionWarning(meshRef.current, modelPosition);
-          if (!willCollide) {
-            meshRef.current.position.set(intersection.x, 0, intersection.z);
+        if (is2D) {
+          // 2D: block movement if collision detected (margin 0.7)
+          const groundPlane = new Plane(new Vector3(0, 1, 0), 0); // y=0 plane
+          const intersection = new Vector3();
+          if (raycaster.ray.intersectPlane(groundPlane, intersection)) {
+            const min = -7.5, max = 7.5;
+            let x = Math.max(min, Math.min(max, intersection.x));
+            let z = Math.max(min, Math.min(max, intersection.z));
+            const offset = modelLocalOffsetRef?.current || new Vector3(0,0,0);
+            x -= offset.x;
+            z -= offset.z;
+            x = Math.max(min, Math.min(max, x));
+            z = Math.max(min, Math.min(max, z));
+            const newPos: [number, number, number] = [x, 0, z];
+            // Check collision at this new position with a small margin (models can't touch)
+              let blocked = false;
+              if (meshRef.current) {
+                const testVec = new Vector3(x, 0, z);
+                blocked = checkCollisionAtPosition(meshRef.current, testVec, 1.0);
+            }
+            if (!blocked) {
+              last2DDragPosition.current = newPos;
+              onPositionChange(newPos);
+            }
+            // If blocked, do not update position (model stays at last valid position)
+          }
+        } else if (meshRef.current) {
+          // 3D: update mesh position directly
+          const groundPlane = new Plane(new Vector3(0, 1, 0), 0);
+          const intersection = new Vector3();
+          if (raycaster.ray.intersectPlane(groundPlane, intersection)) {
+            const min = -7.5, max = 7.5;
+            let x = Math.max(min, Math.min(max, intersection.x));
+            let z = Math.max(min, Math.min(max, intersection.z));
+            const modelPosition = new Vector3(x, 0, z);
+            const willCollide = checkCollisionAtPosition(meshRef.current, modelPosition);
+            updateCollisionWarning(meshRef.current, modelPosition);
+            if (!willCollide) {
+              meshRef.current.position.set(x, 0, z);
+            }
           }
         }
       };
@@ -105,35 +158,45 @@ export function useDragControls(
         }
 
         if (meshRef.current) {
-          const finalPosition = new Vector3(
-            meshRef.current.position.x,
-            meshRef.current.position.y,
-            meshRef.current.position.z
-          );
-
-          const hasCollision = checkCollisionAtPosition(
-            meshRef.current,
-            finalPosition
-          );
-
-          if (hasCollision) {
-            meshRef.current.position.set(...originalPosition);
-            setPosition(originalPosition);
+          if (viewMode === "2d") {
+            // 2D: Commit the last valid dragged position (blocked if collision)
+            const dropPos = last2DDragPosition.current ?? [meshRef.current.position.x, 0, meshRef.current.position.z];
+            setPosition(dropPos);
+            onPositionChange(dropPos);
+            last2DDragPosition.current = null;
           } else {
-            const newPosition: [number, number, number] = [
+            // 3D: keep original collision logic
+            const finalPosition = new Vector3(
               meshRef.current.position.x,
               meshRef.current.position.y,
-              meshRef.current.position.z,
-            ];
-            setPosition(newPosition);
-            onPositionChange(newPosition);
+              meshRef.current.position.z
+            );
+            const hasCollision = checkCollisionAtPosition(
+              meshRef.current,
+              finalPosition
+            );
+            // Only commit position if no collision
+            if (hasCollision) {
+              meshRef.current.position.set(...originalPosition);
+              setPosition(originalPosition);
+            } else {
+              const newPosition: [number, number, number] = [
+                meshRef.current.position.x,
+                meshRef.current.position.y,
+                meshRef.current.position.z,
+              ];
+              setPosition(newPosition);
+              onPositionChange(newPosition);
+            }
           }
         }
 
         resetCollisionWarning();
 
+        // Always re-enable pointer events for future drags
         document.removeEventListener("mousemove", handleMouseMove);
         document.removeEventListener("mouseup", handleMouseUp);
+        // No-op: pointer events are not disabled, so drag can be started again
       };
 
       document.addEventListener("mousemove", handleMouseMove);
