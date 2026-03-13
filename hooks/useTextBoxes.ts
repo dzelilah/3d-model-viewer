@@ -5,6 +5,8 @@ import {
   onSnapshot,
   setDoc,
   deleteDoc,
+  getDocs,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
@@ -64,6 +66,23 @@ export function useTextBoxes(sceneId: string) {
     if (selectedId === id) setSelectedId(null);
   };
 
+  /** Replace all boxes with a snapshot (for undo/redo). Syncs to Firebase. */
+  const replaceBoxes = async (newBoxes: TextBoxData[]) => {
+    const colRef = collection(db, "scenes", sceneId, "textBoxes");
+    const snapshot = await getDocs(colRef);
+    const batch = writeBatch(db);
+    const newIds = new Set(newBoxes.map((b) => b.id));
+    snapshot.docs.forEach((d) => {
+      if (!newIds.has(d.id)) batch.delete(d.ref);
+    });
+    newBoxes.forEach((box) => {
+      batch.set(doc(colRef, box.id), box);
+    });
+    await batch.commit();
+    setBoxes(newBoxes);
+    if (selectedId && !newIds.has(selectedId)) setSelectedId(null);
+  };
+
   return {
     boxes,
     activeTool,
@@ -73,5 +92,6 @@ export function useTextBoxes(sceneId: string) {
     addBox,
     updateBox,
     removeBox,
+    replaceBoxes,
   };
 }

@@ -2,7 +2,7 @@
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment, useGLTF } from "@react-three/drei";
 import { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Group } from "three";
 import * as THREE from "three";
 import { useModelSync } from "../hooks/useModelSync";
@@ -14,6 +14,8 @@ import { useDragControls } from "../hooks/useDragControls";
 import { useVisualFeedback } from "../hooks/useVisualFeedback";
 import TextBox from "./TextBox";
 import { useTextBoxes } from "../hooks/useTextBoxes";
+import { useHistoryStack } from "../lib/history";
+import type { SceneSnapshot } from "../lib/history";
 
 interface DualModelViewerProps {
   viewMode: "3d" | "2d";
@@ -221,6 +223,10 @@ interface SceneContentProps {
   textboxDragging: boolean;
   selectedId: string | null;
   onModelDragChange: (dragging: boolean) => void;
+  onModel1DragStart?: () => void;
+  onModel2DragStart?: () => void;
+  onModel1DragEnd?: () => void;
+  onModel2DragEnd?: () => void;
   model1Dragging2D: boolean;
   model2Dragging2D: boolean;
   setModel1Dragging2D: (dragging: boolean) => void;
@@ -243,6 +249,10 @@ function SceneContent({
   textboxDragging,
   selectedId,
   onModelDragChange,
+  onModel1DragStart,
+  onModel2DragStart,
+  onModel1DragEnd,
+  onModel2DragEnd,
   model1Dragging2D,
   model2Dragging2D,
   setModel1Dragging2D,
@@ -348,6 +358,8 @@ function SceneContent({
         modelRef={model1Ref}
         onPositionChange={onModel1PositionChange}
         onDragStateChange={(dragging) => {
+          if (dragging) onModel1DragStart?.();
+          else onModel1DragEnd?.();
           onModelDragChange?.(dragging);
           if (viewMode === "2d") {
             setModel1Dragging2D(dragging);
@@ -374,6 +386,8 @@ function SceneContent({
         modelRef={model2Ref}
         onPositionChange={onModel2PositionChange}
         onDragStateChange={(dragging) => {
+          if (dragging) onModel2DragStart?.();
+          else onModel2DragEnd?.();
           onModelDragChange?.(dragging);
           if (viewMode === "2d") {
             setModel2Dragging2D(dragging);
@@ -403,6 +417,7 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
     addBox,
     updateBox,
     removeBox,
+    replaceBoxes,
   } = useTextBoxes("default");
   const model1 = useModelSync("model1", [-3, 0, 0], 0);
   const model2 = useModelSync("model2", [3, 0, 0], 0);
@@ -412,6 +427,96 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
   const [modelDragging, setModelDragging] = useState(false);
   const [model1Dragging2D, setModel1Dragging2D] = useState(false);
   const [model2Dragging2D, setModel2Dragging2D] = useState(false);
+  const history = useHistoryStack();
+  const model1DragSnapshotRef = useRef<SceneSnapshot | null>(null);
+  const model2DragSnapshotRef = useRef<SceneSnapshot | null>(null);
+  const textboxDragSnapshotRef = useRef<SceneSnapshot | null>(null);
+  const model1RotationSnapshotRef = useRef<SceneSnapshot | null>(null);
+  const model2RotationSnapshotRef = useRef<SceneSnapshot | null>(null);
+
+  const getCurrentSnapshot = useCallback((): SceneSnapshot => ({
+    boxes: [...boxes],
+    selectedId,
+    model1: { position: [...model1.position], rotation: model1.rotation },
+    model2: { position: [...model2.position], rotation: model2.rotation },
+  }), [boxes, selectedId, model1.position, model1.rotation, model2.position, model2.rotation]);
+
+  const applySnapshot = useCallback(async (snap: SceneSnapshot) => {
+    await replaceBoxes(snap.boxes);
+    setSelectedId(snap.selectedId);
+    await model1.setSyncedState(snap.model1.position, snap.model1.rotation);
+    await model2.setSyncedState(snap.model2.position, snap.model2.rotation);
+  }, [replaceBoxes, setSelectedId, model1.setSyncedState, model2.setSyncedState]);
+
+  const getCurrentSnapshotRef = useRef(getCurrentSnapshot);
+  const applySnapshotRef = useRef(applySnapshot);
+  getCurrentSnapshotRef.current = getCurrentSnapshot;
+  applySnapshotRef.current = applySnapshot;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        const current = getCurrentSnapshotRef.current();
+        if (e.shiftKey) {
+          const snap = history.redo(current);
+          if (snap) applySnapshotRef.current(snap);
+        } else {
+          const snap = history.undo(current);
+          if (snap) applySnapshotRef.current(snap);
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+        e.preventDefault();
+        const current = getCurrentSnapshotRef.current();
+        const snap = history.redo(current);
+        if (snap) applySnapshotRef.current(snap);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [history]);
+
+  const addBoxWithHistory = useCallback((position: [number, number, number]) => {
+    history.push(getCurrentSnapshot());
+    addBox(position);
+  }, [history.push, getCurrentSnapshot, addBox]);
+
+  const updateBoxWithHistory = useCallback((id: string, patch: Parameters<typeof updateBox>[1]) => {
+    const isPositionOnlyDuringDrag =
+      textboxDragging &&
+      Object.keys(patch).every((k) => k === "position" || k === "rotation");
+    if (!isPositionOnlyDuringDrag) {
+      history.push(getCurrentSnapshot());
+    }
+    updateBox(id, patch);
+  }, [history.push, getCurrentSnapshot, updateBox, textboxDragging]);
+
+  const removeBoxWithHistory = useCallback((id: string) => {
+    history.push(getCurrentSnapshot());
+    removeBox(id);
+  }, [history.push, getCurrentSnapshot, removeBox]);
+
+  const onModel1DragStart = useCallback(() => {
+    model1DragSnapshotRef.current = getCurrentSnapshot();
+  }, [getCurrentSnapshot]);
+
+  const onModel1DragEnd = useCallback(() => {
+    const snap = model1DragSnapshotRef.current;
+    model1DragSnapshotRef.current = null;
+    if (snap) history.push(snap);
+  }, [history.push]);
+
+  const onModel2DragStart = useCallback(() => {
+    model2DragSnapshotRef.current = getCurrentSnapshot();
+  }, [getCurrentSnapshot]);
+
+  const onModel2DragEnd = useCallback(() => {
+    const snap = model2DragSnapshotRef.current;
+    model2DragSnapshotRef.current = null;
+    if (snap) history.push(snap);
+  }, [history.push]);
 
   if (model1.isLoading || model2.isLoading) {
     return (
@@ -504,15 +609,11 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
         style={{ width: "100%", height: "100%" }}
         onPointerDown={(e) => {
           if (activeTool !== "text-box") return;
-          const ndc = {
-            x: (e.clientX / (e.target as HTMLElement).clientWidth) * 2 - 1,
-            y: -(e.clientY / (e.target as HTMLElement).clientHeight) * 2 + 1,
-          };
           const point = (e as any).point as THREE.Vector3 | undefined;
           const pos: [number, number, number] = point
             ? [point.x, Math.max(point.y, 0.01), point.z]
             : [0, 0.01, 0];
-          addBox(pos);
+          addBoxWithHistory(pos);
           setActiveTool("none");
         }}
       >
@@ -524,10 +625,14 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
           model2Rotation={model2.rotation}
           onModel1PositionChange={model1.setSyncedPosition}
           onModel2PositionChange={model2.setSyncedPosition}
+          onModel1DragStart={onModel1DragStart}
+          onModel2DragStart={onModel2DragStart}
+          onModel1DragEnd={onModel1DragEnd}
+          onModel2DragEnd={onModel2DragEnd}
           model1Ref={model1Ref}
           model2Ref={model2Ref}
           activeTool={activeTool}
-          addBox={addBox}
+          addBox={addBoxWithHistory}
           setActiveTool={setActiveTool}
           textboxDragging={textboxDragging}
           selectedId={selectedId}
@@ -543,11 +648,19 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
             box={b}
             selected={selectedId === b.id}
             onSelect={setSelectedId}
-            onChange={updateBox}
-            onRemove={removeBox}
+            onChange={updateBoxWithHistory}
+            onRemove={removeBoxWithHistory}
             onDone={() => setSelectedId(null)}
-            onDragStart={() => setTextboxDragging(true)}
-            onDragEnd={() => setTextboxDragging(false)}
+            onDragStart={() => {
+              textboxDragSnapshotRef.current = getCurrentSnapshot();
+              setTextboxDragging(true);
+            }}
+            onDragEnd={() => {
+              const snap = textboxDragSnapshotRef.current;
+              textboxDragSnapshotRef.current = null;
+              if (snap) history.push(snap);
+              setTextboxDragging(false);
+            }}
             modelDragging={modelDragging}
           />
         ))}
@@ -564,24 +677,23 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
               min="0"
               max="100"
               value={model1.rotation}
+              onPointerDown={() => {
+                model1RotationSnapshotRef.current = getCurrentSnapshot();
+              }}
+              onPointerUp={() => {
+                const snap = model1RotationSnapshotRef.current;
+                model1RotationSnapshotRef.current = null;
+                if (snap) history.push(snap);
+              }}
               onChange={(e) => {
                 const proposed = Number(e.target.value);
                 if (model1Ref.current && model2Ref.current) {
                   const g = model1Ref.current;
                   const prevY = g.rotation.y;
                   g.rotation.y = (proposed / 100) * Math.PI * 2;
-                  g.updateMatrixWorld(true); 
+                  g.updateMatrixWorld(true);
                   const margin = viewMode === "2d" ? 1.2 : 1.2;
                   const band = viewMode === "2d" ? 0.001 : undefined;
-                  if (viewMode === "2d") {
-                    console.log("2D Rotation Debug", {
-                      margin,
-                      band,
-                      g1: g,
-                      g2: model2Ref.current,
-                      rot: proposed,
-                    });
-                  }
                   const intersects = checkGroupsIntersectXZ(
                     g,
                     model2Ref.current,
@@ -609,24 +721,23 @@ export default function DualModelViewer({ viewMode }: DualModelViewerProps) {
               min="0"
               max="100"
               value={model2.rotation}
+              onPointerDown={() => {
+                model2RotationSnapshotRef.current = getCurrentSnapshot();
+              }}
+              onPointerUp={() => {
+                const snap = model2RotationSnapshotRef.current;
+                model2RotationSnapshotRef.current = null;
+                if (snap) history.push(snap);
+              }}
               onChange={(e) => {
                 const proposed = Number(e.target.value);
                 if (model2Ref.current && model1Ref.current) {
                   const g = model2Ref.current;
                   const prevY = g.rotation.y;
                   g.rotation.y = (proposed / 100) * Math.PI * 2;
-                  g.updateMatrixWorld(true); 
+                  g.updateMatrixWorld(true);
                   const margin = viewMode === "2d" ? 1.2 : 1.2;
                   const band = viewMode === "2d" ? 0.001 : undefined;
-                  if (viewMode === "2d") {
-                    console.log("2D Rotation Debug", {
-                      margin,
-                      band,
-                      g1: g,
-                      g2: model1Ref.current,
-                      rot: proposed,
-                    });
-                  }
                   const intersects = checkGroupsIntersectXZ(
                     g,
                     model1Ref.current,

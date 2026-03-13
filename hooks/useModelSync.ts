@@ -94,6 +94,16 @@ export function useModelSync(
     [updateFirestore, position]
   );
 
+  /** Set position and rotation in one update (e.g. for undo/redo). */
+  const setSyncedState = useCallback(
+    async (newPos: Position, newRot: number) => {
+      setPosition(newPos);
+      setRotation(newRot);
+      await updateFirestore(newPos, newRot);
+    },
+    [updateFirestore]
+  );
+
   return {
     position,
     rotation,
@@ -101,5 +111,6 @@ export function useModelSync(
     error,
     setSyncedPosition,
     setSyncedRotation,
+    setSyncedState,
   };
 }
